@@ -1,5 +1,5 @@
 # LibVM
-Virtual machine for OpenOS\
+Virtual machine for OpenOS
 
 Виртуальная машина для операционной системы OpenOS, для мода opencomputers в игре minecraft.
 
