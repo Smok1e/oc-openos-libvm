@@ -5,7 +5,7 @@
 
 local component = require ("component")
 local computer  = require ("computer")
-local crc32     = require ("crc32_hash")
+local crc32     = require ("libvm_crc32")
 
 local gpu = component.gpu
 local fs = component.proxy (computer.getBootAddress ())
