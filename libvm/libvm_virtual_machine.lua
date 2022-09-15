@@ -1,23 +1,83 @@
--- Virtual machine library (vm)
--- Helps to handle with virtual components, filesystem, etc.
-
--------------------------------------------
+-- LibVM virtual machine
+-- Emulates components, component API, computer API, events, etc.
+-- WARNING! By reading this code, you can get schizophrenia
 
 local component = require ("component")
 local computer  = require ("computer")
-local crc32     = require ("libvm_crc32")
+local crc32     = require ("libvm/libvm_crc32")
 
-local gpu = component.gpu
-local fs = component.proxy (computer.getBootAddress ())
+local gpu   = component.gpu
+local fs    = component.proxy (computer.getBootAddress ())
+local tmpfs = component.proxy (computer.tmpAddress     ())
+
+------------------------------------------- Initializing, service functions
 
 local vm = {}
 vm.vendor = "Smok1e shitcode Ltd."
+vm.logTimezone = 3*60*60*1000 -- GMT+3, Moscow
+vm.logDirectory = "/etc"
+vm.logging = false -- Set this variable to true to enable virtual machine logging
+
+-- Used for unrealized yet functions
+local function stub () end
+
+-- Returns current timestamp
+local function getRealTime ()
+    local handle, reason = tmpfs.open ("timestamp", "w")
+    if not handle then
+        error ("failed to open " .. reason)
+    end
+
+    tmpfs.close (handle)
+    
+    -- Simple hack for opencomputers: filesystem.lastModified returns real timestamp of last file modification
+    -- os.date uses timestamp as seconds (fucking lua), so we need to divide it to 1000
+    local timestamp = tmpfs.lastModified ("timestamp") / 1000
+    tmpfs.remove ("timestamp")
+
+    return timestamp
+end
+
+vm.initUptime = computer.uptime ()
+vm.initRealTime = getRealTime ()
+
+-- Not to be confused with getRealTime. calculateRealTime returs timestamp based on last synchronized real time and computer.uptime
+-- Use this function instead of getRealTime for optimization
+local function calculateRealTime (timezone)
+    checkArg (1, timezone, "number", "nil")
+    return vm.initRealTime + computer.uptime () - vm.initUptime + ((timezone or 0) / 1000)
+end
+
+function vm.log (header, ...)
+    checkArg (1, header, "string")
+
+    if not vm.logPath then
+        local logDirectory = vm.logDirectory .. "/libvm-logs"
+        if not fs.isDirectory (logDirectory) then
+            assert (fs.makeDirectory (logDirectory), "failed to create libvm log directory; perhaps " .. logDirectory .. " is an existing file")
+        end
+
+        vm.logPath = string.format ("%s/log_%s.log", logDirectory, os.date ("%d-%m-%Y_%H-%M-%S", calculateRealTime (vm.logTimezone)))
+    end
+
+    local handle, reason = fs.open (vm.logPath, "a")
+    if not handle then
+        error ("failed to open file '" .. vm.logPath .. "': " .. reason)
+    end
+
+    fs.write (handle, string.format ("[%s] %-15s ", os.date ("%X", calculateRealTime (vm.logTimezone)), "<" .. header .. ">:"))
+    for _, value in pairs ({...}) do
+        fs.write (handle, string.format ("%-45s ", tostring (value)))
+    end
+    
+    fs.write (handle, "\n")
+    fs.close (handle)
+end
 
 ------------------------------------------- Components
 
 vm.component = {}
 vm.component.list = {}
-vm.component.proxyLog = false -- Set this value to true will enable virtual components proxy functions logging
 
 function vm.component.generateComponentID (componentName)
     checkArg (1, componentName, "string")
@@ -232,7 +292,6 @@ vm.computer = {}
 vm.computer.address = vm.component.generateComponentID ("computer")
 vm.computer.startTime = computer.uptime ()
 vm.computer.eventQueue = {}
-vm.computer.eventLog = false -- Set this value to true will enable virtual coumputer events logging
 
 function vm.computer.handleEvent (event)
     checkArg (1, event, "table")
@@ -246,17 +305,26 @@ function vm.computer.handleEvent (event)
             return true
         end
     end
-
-    local function pass ()
+    
+    local eventType = event[1]
+    if eventType == "key_down" or
+       eventType == "key_up"   then
         vm.computer.api.pushSignal (table.unpack (event))
         return true
     end
+end
 
-    local eventType = event[1]
-    if eventType == 'key_down'      then return pass () end
-    if eventType == 'modem_message' then return pass () end
+function vm.computer.popEvent (unpack)
+    checkArg (1, unpack, "boolean", "nil")
 
-    return true
+    if #vm.computer.eventQueue > 0 then
+        local event = table.remove (vm.computer.eventQueue, #vm.computer.eventQueue)
+        if unpack then
+            return table.unpack (event)
+        else
+            return event
+        end
+    end
 end
 
 function vm.computer.getDeviceInfo ()
@@ -274,7 +342,7 @@ function vm.computer.setTmpAddress (address)
         return false, "no such component"
     end
 
-    vm.computer.tmlFilesystemAddress = address
+    vm.computer.tmpFilesystemAddress = address
     return address
 end
 
@@ -329,7 +397,7 @@ end
 
 function vm.computer.api.pushSignal (name, ...)
     checkArg (1, name, "string")
-    vm.computer.eventQueue[#vm.computer.eventQueue+1] = {name, ...}
+    table.insert (vm.computer.eventQueue, {name, ...})
 end
 
 function vm.computer.api.pullSignal (timeout)
@@ -341,22 +409,20 @@ function vm.computer.api.pullSignal (timeout)
         end
     end
 
-    vm.computer.handleEvent ({computer.pullSignal (timeout)})
+    local event
     if #vm.computer.eventQueue > 0 then
-        if vm.computer.eventLog then
-            local handle = fs.open ('/vm_events.log', 'a')
-            if handle then
-                for index, value in pairs (vm.computer.eventQueue[1]) do
-                    fs.write (handle, string.format ("%-10s", tostring (value)))
-                end
+        event = vm.computer.popEvent ()
+    else
+        vm.computer.handleEvent ({computer.pullSignal (timeout)})
+        event = vm.computer.popEvent ()
+    end
 
-                fs.write (handle, "\n")
-            end
-
-            fs.close (handle)
+    if event then
+        if vm.logging then
+            vm.log ("Event", table.unpack (event))
         end
 
-        return table.unpack (table.remove (vm.computer.eventQueue, 1))
+        return table.unpack (event)
     end
 end
 
@@ -404,7 +470,17 @@ function vm.computer.api.getBootAddress ()
 end
 
 function vm.computer.api.tmpAddress ()
-    return vm.computer.tmlFilesystemAddress
+    return vm.computer.tmpFilesystemAddress
+end
+
+function vm.computer.api.log (...)
+    local str = ""
+    for _, value in pairs ({...}) do
+        str = str .. string.format ("%-30s ", value)
+    end
+
+    vm.log ("computer API %-s", str)
+    return str
 end
 
 ------------------------------------------- Virtual components
@@ -429,16 +505,8 @@ local function virtualComponentProxy (virtualComponent)
 
             if type (value) == "function" then
                 local wrapper = function (...)
-                    if vm.component.proxyLog then -- Writing proxies logs in debugging purposes
-                        local handle = fs.open ('/vm_proxies.log', 'a')
-                        if handle then
-                            fs.write (handle, string.format ("%-48s %-10s   %-10s ", virtualComponent.address, virtualComponent.name, key))
-                            for index, value in pairs ({...}) do
-                                fs.write (handle, string.format ("%-10s ", tostring (value)))
-                            end
-                            fs.write (handle, "\n")
-                            fs.close (handle)
-                        end
+                    if vm.logging then
+                        vm.log ("Proxy call", virtualComponent.address, virtualComponent.name, key, ...)
                     end
 
                     return value (virtualComponent, ...)
@@ -452,7 +520,7 @@ local function virtualComponentProxy (virtualComponent)
     })
 end
 
--- Information returned by this function will be returned from vm.computer.api.getDeviceInfo ()
+-- Information returned by this function will be returned by vm.computer.api.getDeviceInfo ()
 local function virtualComponentGetDeviceInfo (virtualComponent)
     return {
         vendor = vm.vendor,
@@ -488,8 +556,8 @@ local function virtualGpuRelease (virtualGpu)
         return false
     end
 
-    if virtualGpu.screenBuffer then
-        gpu.freeBuffer (virtualGpu.screenBuffer)
+    for _, index in pairs (virtualGpu.vramBuffers) do
+        gpu.freeBuffer (index)
     end
 
     if virtualGpu.boundScreen then
@@ -514,10 +582,15 @@ end
 
 -- Used to execute gpu methods in local screen buffer
 local function virtualGpuExecute (virtualGpu, method, ...)
+    checkArg (1, method, "string")
+
+    local func = gpu[method]
+    assert (func, "trying to execute unexisting gpu method - " .. method)
+
     local oldBuffer = gpu.getActiveBuffer ()
-    gpu.setActiveBuffer (virtualGpu.activeBuffer)
+    gpu.setActiveBuffer (virtualGpu.vramBuffers[virtualGpu.activeBuffer])
     
-    local result = {xpcall (method, debug.traceback, ...)}
+    local result = {xpcall (func, debug.traceback, ...)}
     gpu.setActiveBuffer (oldBuffer)
 
     if not result[1] then
@@ -528,7 +601,7 @@ local function virtualGpuExecute (virtualGpu, method, ...)
         virtualGpu.boundScreen:display ()
     end
 
-    return table.unpack (result, 1)
+    return table.unpack (result, 2)
 end
 
 local function virtualGpuMaxResolution (virtualGpu)
@@ -543,24 +616,17 @@ local function virtualGpuSetResolution (virtualGpu, resolutionX, resolutionY)
         error ("unsupported resolution")
     end
 
-    if resolutionX == virtualGpu.resolutionX and resolutionY == virtualGpu.resolutionY then
+    local virtualGpuResX, virtualGpuResY = virtualGpu:getResolution ()
+    if resolutionX == virtualGpuResX and resolutionY == virtualGpuResY then
         return false
     end
 
-    -- Resizing video buffer
-    virtualGpu.releaseBuffer (screenBuffer)
-    virtualGpu.screenBuffer, reason = virtualGpu.allocateBuffer (resolutionX, resolutionY)
-    if not virtualGpu.screenBuffer then
-        error (reason)
-    end
-
-    virtualGpu.resolutionX = resolutionX
-    virtualGpu.resolutionY = resolutionY
-    return true
+    return virtualGpu:execute ("setResolution", resolutionX, resolutionY)
 end
 
 local function virtualGpuGetResolution (virtualGpu)
-    return virtualGpu.resolutionX, virtualGpu.resolutionY
+    -- Resolution is linked to vram buffer
+    return virtualGpu:execute ("getResolution")
 end
 
 local function virtualGpuSet (virtualGpu, x, y, text, vertical)
@@ -569,14 +635,14 @@ local function virtualGpuSet (virtualGpu, x, y, text, vertical)
     checkArg (3, text,     "string"        )
     checkArg (4, vertical, "boolean", "nil")
 
-    return virtualGpu:execute (gpu.set, x, y, text, vertical)
+    return virtualGpu:execute ("set", x, y, text, vertical)
 end
 
 local function virtualGpuGet (virtualGpu, x, y)
     checkArg (1, x, "number")
     checkArg (2, y, "number")
 
-    return virtualGpu:execute (gpu.set, x, y)
+    return virtualGpu:execute ("get", x, y)
 end
 
 local function virtualGpuFill (virtualGpu, x, y, width, height, character)
@@ -586,31 +652,42 @@ local function virtualGpuFill (virtualGpu, x, y, width, height, character)
     checkArg (4, height,    "number")
     checkArg (5, character, "string")
 
-    return virtualGpu:execute (gpu.fill, x, y, width, height, character)
+    return virtualGpu:execute ("fill", x, y, width, height, character)
+end
+
+local function virtualGpuCopy (virtualGpu, x, y, width, height, tx, ty)
+    checkArg (1, x,      "number")
+    checkArg (2, y,      "number")
+    checkArg (3, width,  "number")
+    checkArg (4, height, "number")
+    checkArg (5, tx,     "number")
+    checkArg (6, ty,     "number")
+
+    return virtualGpu:execute ("copy", x, y, width, height, tx, ty)
 end
 
 local function virtualGpuSetBackground (virtualGpu, value, palette)
-    checkArg (1, value,   "number"       )
-    checkArg (2, palette, "number", "nil")
+    checkArg (1, value,   "number"        )
+    checkArg (2, palette, "boolean", "nil")
 
     -- Опытным путём я выяснил, что background и foreground привязаны к vram-буферу
     -- По этому можно не кешировать эти параметры и полагаться полностью на видеопамять
-    return virtualGpu:execute (gpu.setBackground, value, palette)
+    return virtualGpu:execute ("setBackground", value, palette)
 end
 
 local function virtualGpuGetBackground (virtualGpu)
-    return virtualGpu:execute (gpu.getBackground)
+    return virtualGpu:execute ("getBackground")
 end
 
 local function virtualGpuSetForeground (virtualGpu, value, palette)
-    checkArg (1, value,   "number"       )
-    checkArg (2, palette, "number", "nil")
+    checkArg (1, value,   "number"        )
+    checkArg (2, palette, "boolean", "nil")
 
-    return virtualGpu:execute (gpu.setForeground, value, palette)
+    return virtualGpu:execute ("setForeground", value, palette)
 end
 
 local function virtualGpuGetForeground (virtualGpu)
-    return virtualGpu:execute (gpu.getForeground)
+    return virtualGpu:execute ("getForeground")
 end
 
 local function virtualGpuBind (virtualGpu, address, reset)
@@ -634,18 +711,144 @@ local function virtualGpuGetScreen (virtualGpu)
     end
 end
 
+local function virtualGpuMaxDepth (virtualGpu)
+    return virtualGpu:execute ("maxDepth")
+end
+
+local function virtualGpuGetDepth (virtualGpu)
+    return virtualGpu:execute ("getDepth")
+end
+
+local function virtualGpuSetDepth (virtualGpu, depth)
+    checkArg (1, depth, "number")
+    return virtualGpu:execute ("setDepth", depth)
+end
+
+local function virtualGpuGetViewport (virtualGpu)
+    return virtualGpu:getResolution ()
+end
+
+local function virtualGpuSetViewport (virtualGpu, width, height)
+    checkArg (1, width,  "number")
+    checkArg (1, height, "number")
+    return virtualGpu:setResolution (width, height)
+end
+
+local function virtualGpuGetActiveBuffer (virtualGpu)
+    return virtualGpu.activeBuffer
+end
+
+local function virtualGpuSetActiveBuffer (virtualGpu, index)
+    checkArg (1, index, "number")
+    if not virtualGpu.vramBuffers[index] then
+        return nil, "invalid buffer index"
+    end
+
+    local oldActiveBuffer = virtualGpu.activeBuffer
+    virtualGpu.activeBuffer = index
+    return oldActiveBuffer
+end
+
+local function virtualGpuBuffers (virtualGpu)
+    local buffers = {}
+    for index in pairs (virtualGpu.vramBuffers) do
+        if index ~= 0 then
+            table.insert (buffers, index)
+        end
+    end
+
+    buffers.n = #buffers
+    return buffers
+end
+
+local function virtualGpuAllocateBuffer (virtualGpu, width, height)
+    checkArg (1, width,  "number", "nil")
+    checkArg (2, height, "number", "nil")
+
+    local resX, resY = virtualGpu:getResolution ()
+    local index, reason = gpu.allocateBuffer (width or resX, height or resY)
+    if not index then
+        return nil, reason
+    end
+
+    virtualGpu.vramBuffers[#virtualGpu.vramBuffers+1] = index
+    return #virtualGpu.vramBuffers
+end
+
+local function virtualGpuFreeBuffer (virtualGpu, index)
+    checkArg (1, index, "number", "nil")
+    if index == 0 or not virtualGpu.vramBuffers[index] then
+        return nil, "invalid buffer index"
+    end
+
+    if virtualGpu.activeBuffer == index then
+        virtualGpu.activeBuffer = 0
+    end
+
+    return virtualGpu:execute ("freeBuffer", virtualGpu.vramBuffers[index])
+end
+
+local function virtualGpuFreeAllBuffers (virtualGpu)
+    local n = #virtualGpu.vramBuffers
+    for index = 1, n do
+        assert (virtualGpu:execute ("freeBuffer", index))
+    end
+
+    return n
+end
+
+local function virtualGpuTotalMemory (virtualGpu)
+    return virtualGpu:execute ("totalMemory")
+end
+
+local function virtualGpuFreeMemory (virtualGpu)
+    return virtualGpu:execute ("freeMemory")
+end
+
+local function virtualGpuGetBufferSize (virtualGpu, index)
+    checkArg (1, index, "number", "nil")
+    if not virtualGpu.vramBuffers[index] then
+        return nil, "invalid buffer index"
+    end
+
+    return gpu.getBufferSize (virtualGpu.vramBuffers[index])
+end
+
+local function virtualGpuBitblt (virtualGpu, dst, row, col, width, height, src, fromCol, fromRow)
+           -- Arg number, name,    required type,                         default value
+    checkArg (1,          dst,     "number", "nil"); dst     = dst     or 0; local dstBufferSizeX, dstBufferSizeY = virtualGpu:getBufferSize (dst)
+    checkArg (2,          row,     "number", "nil"); row     = row     or 1
+    checkArg (3,          col,     "number", "nil"); col     = col     or 1
+    checkArg (4,          width,   "number", "nil"); width   = width   or dstBufferSizeX
+    checkArg (5,          height,  "number", "nil"); height  = height  or dstBufferSizeY
+    checkArg (6,          src,     "number", "nil"); src     = src     or virtualGpu.activeBuffer
+    checkArg (7,          fromCol, "number", "nil"); fromCol = fromCol or 1
+    checkArg (8,          fromRow, "number", "nil"); fromRow = fromRow or 1
+
+    if not virtualGpu.vramBuffers[dst] or not virtualGpu.vramBuffers[src] then
+        return nil, "invalid buffer index"
+    end
+
+    local res = {virtualGpu:execute ("bitblt", virtualGpu.vramBuffers[dst], row, col, width, height, virtualGpu.vramBuffers[src], fromCol, fromRow)}
+    if dst == 0 and virtualGpu.boundScreen then
+        virtualGpu.boundScreen:display ()
+    end
+
+    return table.unpack (res)
+end
+
 function vm.component.newVirtualGpu (maxResolutionX, maxResolutionY)
-    checkArg (1, resolutionX, "number", "nil")
-    checkArg (2, resolutionY, "number", "nil")
+    checkArg (1, maxResolutionX, "number", "nil")
+    checkArg (2, maxResolutionY, "number", "nil")
 
     local actualMaxResolutionX, actualMaxResolutionY = gpu.getResolution ()
     local virtualGpu = vm.component.newVirtualComponent ("gpu")
 
     virtualGpu.maxResolutionX = maxResolutionX or actualMaxResolutionX
     virtualGpu.maxResolutionY = maxResolutionY or actualMaxResolutionY
-    virtualGpu.resolutionX = virtualGpu.maxResolutionX
-    virtualGpu.resolutionY = virtualGpu.maxResolutionY
-    virtualGpu.boundScreen = nil -- Sets with bound function
+    virtualGpu.boundScreen = nil
+    virtualGpu.activeBuffer = 0 -- Initializing this variable later
+    virtualGpu.vramBuffers = {}
 
     virtualGpu.release = virtualGpuRelease
     virtualGpu.execute = virtualGpuExecute
@@ -657,20 +860,37 @@ function vm.component.newVirtualGpu (maxResolutionX, maxResolutionY)
     virtualGpu.set = virtualGpuSet
     virtualGpu.get = virtualGpuGet
     virtualGpu.fill = virtualGpuFill
+    virtualGpu.copy = virtualGpuCopy
     virtualGpu.setBackground = virtualGpuSetBackground
     virtualGpu.getBackground = virtualGpuGetBackground
     virtualGpu.setForeground = virtualGpuSetForeground
     virtualGpu.getForeground = virtualGpuGetForeground
     virtualGpu.bind = virtualGpuBind
     virtualGpu.getScreen = virtualGpuGetScreen
+    virtualGpu.maxDepth = virtualGpuMaxDepth
+    virtualGpu.getDepth = virtualGpuGetDepth
+    virtualGpu.setDepth = virtualGpuSetDepth
+    virtualGpu.getViewport = virtualGpuGetViewport
+    virtualGpu.setViewport = virtualGpuSetViewport
+    virtualGpu.getActiveBuffer = virtualGpuGetActiveBuffer
+    virtualGpu.setActiveBuffer = virtualGpuSetActiveBuffer
+    virtualGpu.buffers = virtualGpuBuffers
+    virtualGpu.allocateBuffer = virtualGpuAllocateBuffer
+    virtualGpu.freeBuffer = virtualGpuFreeBuffer
+    virtualGpu.freeAllBuffers = virtualGpuFreeAllBuffers
+    virtualGpu.totalMemory = virtualGpuTotalMemory
+    virtualGpu.freeMemory = virtualGpuFreeMemory
+    virtualGpu.getBufferSize = virtualGpuGetBufferSize
+    virtualGpu.bitblt = virtualGpuBitblt
+    -- УХ БЛЯ
 
-    virtualGpu.screenBuffer, reason = gpu.allocateBuffer (virtualGpu.resolutionX, virtualGpu.resolutionY)
-    if not virtualGpu.screenBuffer then
+    -- 0 is always reserved for screen buffer
+    virtualGpu.vramBuffers[0], reason = gpu.allocateBuffer (virtualGpu.maxResolutionX, virtualGpu.maxResolutionY)
+    if not virtualGpu.vramBuffers[0] then
         virtualGpu:release ()
-        error (reason)
+        error ("failed to allocate virtual gpu screen buffer; " .. reason)
     end
 
-    virtualGpu.activeBuffer = virtualGpu.screenBuffer
     return virtualGpu
 end
 
@@ -703,6 +923,8 @@ local function virtualScreenHandleEvent (virtualScreen, event)
             vm.computer.api.pushSignal (eventType, virtualScreen.address, screenX, screenY, button, nickname)
             return true
         end
+
+        return false
     end
 end
 
@@ -740,7 +962,7 @@ local function virtualScreenDisplay (virtualScreen)
             gpu.set (x+1+sizeX/2-#text/2, y+sizeY/2-#lines/2+index, text)
         end
     elseif virtualScreen.boundGpu then
-        gpu.bitblt (0, x+1, y+1, virtualScreen.boundGpu.resolutionX, virtualScreen.boundGpu.resolutionY, virtualScreen.boundGpu.screenBuffer)
+        gpu.bitblt (0, x+1, y+1, sizeX, sizeY, virtualScreen.boundGpu.vramBuffers[0])
     end
 end
 
@@ -748,7 +970,7 @@ end
 -- Otherwise returns half of real used gpu resolution as default value
 local function virtualScreenGetVisualSize (virtualScreen)
     if virtualScreen.boundGpu then
-        return virtualScreen.boundGpu.resolutionX, virtualScreen.boundGpu.resolutionY
+        return virtualScreen.boundGpu:getBufferSize (0)
     end
 
     local realResolutionX, realResolutionY = gpu.getResolution ()
