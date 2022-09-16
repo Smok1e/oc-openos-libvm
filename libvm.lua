@@ -1,5 +1,4 @@
 -- LibVM - Virtual machine library for OpenOS
-
 local fs = require ("filesystem")
 local computer = require ("computer")
 local component = require ("component")
@@ -7,17 +6,12 @@ local serialization = require ("serialization")
 local libvm = {}
 
 -- Machine exit codes
-libvm.EXIT_SHUTDOWN  = 1
-libvm.EXIT_REBOOT    = 2
-libvm.EXIT_INTERRUPT = 3
-libvm.EXIT_HALTED    = 4
-libvm.EXIT_ERROR     = 5
-
-libvm.customErrors = {
-    libvm_shutdown  = libvm.EXIT_SHUTDOWN,
-    libvm_reboot    = libvm.EXIT_REBOOT,
-    libvm_interrupt = libvm.EXIT_INTERRUPT
-}
+libvm.INTERRUPTION_UNKNOWN   = 0
+libvm.INTERRUPTION_SHUTDOWN  = 1
+libvm.INTERRUPTION_REBOOT    = 2
+libvm.INTERRUPTION_INTERRUPT = 3
+libvm.INTERRUPTION_HALTED    = 4
+libvm.INTERRUPTION_ERROR     = 5
 
 ------------------------------------------- Service functions
 
@@ -25,7 +19,7 @@ libvm.customErrors = {
 local function debugLog (...)
     local str = ""
     for _, value in pairs ({...}) do
-        str = str .. tostring (value) .. " "
+        str = str .. tostring (value) .. "   "
     end
 
     local addr = component.list ('debug')()
@@ -34,6 +28,8 @@ local function debugLog (...)
     else
         print ("[libvm/debug]: " .. str)
     end
+
+    return ...
 end
 
 -- Reads whole file
@@ -81,40 +77,18 @@ end
 
 ------------------------------------------- Hooking xpcall and pcall to pass libvm_shutdown and libvm_reboot errors
 
-local function virtualMachineEnvXpcall (executable, msgh, ...)
-    -- This function will be called first when error throws
-    -- So we can be sure that error message will be original
-    local asd
-    local function handler (message, ...)
-        local errorMessage, errorCode = tostring (message), ""
-        for i = #errorMessage, 1, -1 do
-            if errorMessage:sub (i, i) == ':' then
-                errorCode = errorMessage:sub (i+2, #errorMessage)
-                break
-            end
-        end
-
-        asd = errorCode
-
-        if libvm.customErrors[errorCode] then
-            return errorCode
-        else
-            return msgh (message, ...)
-        end
-    end
-
+local function virtualMachineEnvXpcall (virtualMachineInstance, executable, handler, ...)
     local result = {xpcall (executable, handler, ...)}
-    if not result[1] then
-        if libvm.customErrors[result[2]] then
-            error (result[2])
-        end
+    if not result[1] and virtualMachineInstance.interruptionReason then
+        -- Passing error down to next handler
+        error ("libvm_interruption")
     end
 
     return table.unpack (result)
 end
 
-local function virtualMachineEnvPcall (executable, ...)
-    return virtualMachineEnvXpcall (executable, function (...) return ... end)
+local function virtualMachineEnvPcall (virtualMachineInstance, executable, ...)
+    return virtualMachineEnvXpcall (virtualMachineInstance, executable, function (...) return ... end)
 end
 
 ------------------------------------------- Cleaning up
@@ -181,21 +155,28 @@ local function virtualMachineStart (virtualMachine)
     local eepromProxy = virtualMachine.component.api.proxy (eepromAddress)
     local eepromExecutable, eepromSyntaxError = load (eepromProxy.get (), "=virtual_bios", "bt", virtualMachine.env)
     if not eepromExecutable then
-        virtualMachine:displayError ("failed loading bios: " .. eepromSyntaxError)
+        virtualMachine:displayError ("bios loading failed: " .. eepromSyntaxError)
         return false
     end
 
     local result, value = xpcall (eepromExecutable, debug.traceback)
     if not result then
-        if libvm.customErrors[value] then
-            return libvm.customErrors[value]
+        if virtualMachine.interruptionReason then
+            local reason = virtualMachine.interruptionReason
+            virtualMachine.interruptionReason = nil
+
+            if     reason == "shutdown"  then return libvm.INTERRUPTION_SHUTDOWN,  "Machine shutdown"
+            elseif reason == "reboot"    then return libvm.INTERRUPTION_REBOOT,    "Machine reboot"
+            elseif reason == "interrupt" then return libvm.INTERRUPTION_INTERRUPT, "Machine interrupted"
+            else                              return libvm.INTERRUPTION_UNKNOWN,   "Machine interrupted by unknown reason"
+            end
         else
-            return libvm.EXIT_ERROR, value
+            return libvm.INTERRUPTION_ERROR, value
         end
     end
 
     virtualMachine:displayError ("computer halted")
-    return libvm.EXIT_HALTED, "Machine halted"
+    return libvm.INTERRUPTION_HALTED, "Machine halted"
 end
 
 ------------------------------------------- Virtual machine creation
@@ -211,8 +192,8 @@ function libvm.newVirtualMachine ()
         computer = virtualMachine.computer.api,
         component = virtualMachine.component.api,
         unicode = require ("unicode"),
-        pcall = virtualMachineEnvPcall,
-        xpcall = virtualMachineEnvXpcall
+        xpcall = function (executable, handler, ...) return virtualMachineEnvXpcall (virtualMachine, executable, handler, ...) end,
+        pcall  = function (executable,          ...) return virtualMachineEnvPcall  (virtualMachine, executable,          ...) end
     }
 
     virtualMachine.env._G = virtualMachine.env

@@ -1,5 +1,6 @@
 -- LibVM virtual machine
 -- Emulates components, component API, computer API, events, etc.
+-- In simple words, it is `machine.lua`, but virtual.
 -- WARNING! By reading this code, you can get schizophrenia
 
 local component = require ("component")
@@ -14,6 +15,7 @@ local tmpfs = component.proxy (computer.tmpAddress     ())
 
 local vm = {}
 vm.vendor = "Smok1e shitcode Ltd."
+vm.interruptionReason = nil
 vm.logTimezone = 3*60*60*1000 -- GMT+3, Moscow
 vm.logDirectory = "/etc"
 vm.logging = false -- Set this variable to true to enable virtual machine logging
@@ -38,6 +40,7 @@ local function getRealTime ()
     return timestamp
 end
 
+-- Initializing time
 vm.initUptime = computer.uptime ()
 vm.initRealTime = getRealTime ()
 
@@ -48,17 +51,18 @@ local function calculateRealTime (timezone)
     return vm.initRealTime + computer.uptime () - vm.initUptime + ((timezone or 0) / 1000)
 end
 
+-- Initializing logging
+do
+    local logDirectory = vm.logDirectory .. "/libvm-logs"
+    if not fs.isDirectory (logDirectory) then
+        assert (fs.makeDirectory (logDirectory), "failed to create libvm log directory; perhaps " .. logDirectory .. " is an existing file")
+    end
+
+    vm.logPath = string.format ("%s/log_%s.log", logDirectory, os.date ("%d-%m-%Y_%H-%M-%S", calculateRealTime (vm.logTimezone)))
+end
+
 function vm.log (header, ...)
     checkArg (1, header, "string")
-
-    if not vm.logPath then
-        local logDirectory = vm.logDirectory .. "/libvm-logs"
-        if not fs.isDirectory (logDirectory) then
-            assert (fs.makeDirectory (logDirectory), "failed to create libvm log directory; perhaps " .. logDirectory .. " is an existing file")
-        end
-
-        vm.logPath = string.format ("%s/log_%s.log", logDirectory, os.date ("%d-%m-%Y_%H-%M-%S", calculateRealTime (vm.logTimezone)))
-    end
 
     local handle, reason = fs.open (vm.logPath, "a")
     if not handle then
@@ -72,6 +76,11 @@ function vm.log (header, ...)
     
     fs.write (handle, "\n")
     fs.close (handle)
+end
+
+function vm.interrupt (reason)
+   vm.interruptionReason = tostring (reason)
+   error ("libvm_interruption")
 end
 
 ------------------------------------------- Components
@@ -456,9 +465,9 @@ function vm.computer.api.shutdown (reboot)
 
     -- Intentionally throws an error that interrupts virtual machine process
     if reboot then
-        error ("libvm_reboot")
+        vm.interrupt ("reboot")
     else
-        error ("libvm_shutdown")
+        vm.interrupt ("shutdown")
     end
 end
 
@@ -922,10 +931,6 @@ local function virtualScreenRelease (virtualScreen)
         virtualScreen.boundGpu = nil
     end
 
-    local sizeX, sizeY = virtualScreen:getVisualSize ()
-
-    gpu.setBackground (0)
-    gpu.fill (virtualScren.visualPositionX+1, virtualScreen.visualPositionY+1, sizeX-2, sizeY-2, ' ')
     return virtualComponentRelease (virtualScreen)
 end
 
@@ -1399,6 +1404,7 @@ function vm.component.newVirtualEeprom (label)
     virtualEeprom.getDataSize = virtualEepromGetDataSize
     virtualEeprom.getChecksum = virtualEepromGetChecksum
     virtualEeprom.makeReadonly = virtualEepromMakeReadonly    
+    virtualEeprom.setLabel = virtualEepromSetLabel
 
     if label then
         virtualEeprom:setLabel (label)
