@@ -86,11 +86,18 @@ local function virtualMachineEnvXpcall (executable, msgh, ...)
     -- So we can be sure that error message will be original
     local asd
     local function handler (message, ...)
-        local errorMessage = string.sub (tostring (message)
-        asd = errorMessage
+        local errorMessage, errorCode = tostring (message), ""
+        for i = #errorMessage, 1, -1 do
+            if errorMessage:sub (i, i) == ':' then
+                errorCode = errorMessage:sub (i+2, #errorMessage)
+                break
+            end
+        end
 
-        if libvm.customErrors[errorMessage] then
-            return errorMessage
+        asd = errorCode
+
+        if libvm.customErrors[errorCode] then
+            return errorCode
         else
             return msgh (message, ...)
         end
@@ -98,7 +105,6 @@ local function virtualMachineEnvXpcall (executable, msgh, ...)
 
     local result = {xpcall (executable, handler, ...)}
     if not result[1] then
-        debugLog (asd)
         if libvm.customErrors[result[2]] then
             error (result[2])
         end

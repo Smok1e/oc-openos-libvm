@@ -922,6 +922,10 @@ local function virtualScreenRelease (virtualScreen)
         virtualScreen.boundGpu = nil
     end
 
+    local sizeX, sizeY = virtualScreen:getVisualSize ()
+
+    gpu.setBackground (0)
+    gpu.fill (virtualScren.visualPositionX+1, virtualScreen.visualPositionY+1, sizeX-2, sizeY-2, ' ')
     return virtualComponentRelease (virtualScreen)
 end
 
