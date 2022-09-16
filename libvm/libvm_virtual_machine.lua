@@ -306,6 +306,15 @@ function vm.computer.handleEvent (event)
         end
     end
     
+    if eventType == "key_down" or eventType == "key_up" then
+        local key, alt = event[3], event[4]
+        if key == 0 and alt == 29 then -- Control key
+            vm.controlPressed = (eventType == "key_down")
+        elseif key == 99 then -- C key
+            vm.shouldInterrupt = (vm.controlPressed == true and eventType == "key_up")
+        end
+    end
+
     local eventType = event[1]
     if eventType == "key_down" or
        eventType == "key_up"   then
@@ -402,6 +411,10 @@ end
 
 function vm.computer.api.pullSignal (timeout)
     checkArg (1, timeout, "number", "nil")
+
+    if vm.shouldInterrupt then
+        error ("libvm_interrupt")
+    end
 
     for index, instance in pairs (vm.component.list) do
         if instance.name == 'screen' and instance.autoDisplay ~= true then

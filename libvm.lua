@@ -7,10 +7,17 @@ local serialization = require ("serialization")
 local libvm = {}
 
 -- Machine exit codes
-libvm.EXIT_SHUTDOWN = 1
-libvm.EXIT_REBOOT   = 2
-libvm.EXIT_HALTED   = 3 
-libvm.EXIT_ERROR    = 4
+libvm.EXIT_SHUTDOWN  = 1
+libvm.EXIT_REBOOT    = 2
+libvm.EXIT_INTERRUPT = 3
+libvm.EXIT_HALTED    = 4
+libvm.EXIT_ERROR     = 5
+
+libvm.customErrors = {
+    libvm_shutdown  = libvm.EXIT_SHUTDOWN,
+    libvm_reboot    = libvm.EXIT_REBOOT,
+    libvm_interrupt = libvm.EXIT_INTERRUPT
+}
 
 ------------------------------------------- Service functions
 
@@ -74,28 +81,34 @@ end
 
 ------------------------------------------- Hooking xpcall and pcall to pass libvm_shutdown and libvm_reboot errors
 
-local function virtualMachineEnvPcall (executable, ...)
-    local result = {pcall (executable, ...)}
+local function virtualMachineEnvXpcall (executable, msgh, ...)
+    -- This function will be called first when error throws
+    -- So we can be sure that error message will be original
+    local asd
+    local function handler (message, ...)
+        local errorMessage = string.sub (tostring (message)
+        asd = errorMessage
+
+        if libvm.customErrors[errorMessage] then
+            return errorMessage
+        else
+            return msgh (message, ...)
+        end
+    end
+
+    local result = {xpcall (executable, handler, ...)}
     if not result[1] then
-        local errorMessage = serialization.serialize (result[2])
-        if errorMessage:find ("libvm_shutdown") or errorMessage:find ("libvm_reboot") then
-            error (errorMessage)
+        debugLog (asd)
+        if libvm.customErrors[result[2]] then
+            error (result[2])
         end
     end
 
     return table.unpack (result)
 end
 
-local function virtualMachineEnvXpcall (executable, handler, ...)
-    local result = {xpcall (executable, handler, ...)}
-    if not result[1] then
-        local errorMessage = serialization.serialize (result[2])
-        if errorMessage:find ("libvm_shutdown") or errorMessage:find ("libvm_reboot") then
-            error (errorMessage)
-        end
-    end
-
-    return table.unpack (result)
+local function virtualMachineEnvPcall (executable, ...)
+    return virtualMachineEnvXpcall (executable, function (...) return ... end)
 end
 
 ------------------------------------------- Cleaning up
@@ -168,15 +181,10 @@ local function virtualMachineStart (virtualMachine)
 
     local result, value = xpcall (eepromExecutable, debug.traceback)
     if not result then
-        local errorMessage = tostring (value)
-
-        if errorMessage:find ("libvm_shutdown") then
-            return libvm.EXIT_SHUTDOWN, "Machine shutdown"
-        elseif errorMessage:find ("libvm_reboot") then
-            return libvm.EXIT_REBOOT, "Machine reboot"
+        if libvm.customErrors[value] then
+            return libvm.customErrors[value]
         else
-            virtualMachine:displayError (value)
-            return libvm.EXIT_ERROR, errorTraceback
+            return libvm.EXIT_ERROR, value
         end
     end
 
