@@ -1,5 +1,3 @@
-[!image](https://github.com/Smok1e/oc-openos-libvm/blob/main/logo.png?raw=true)
-
 # LibVM
 Virtual machine for OpenOS
 
