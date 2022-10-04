@@ -1,14 +1,18 @@
 ﻿local component = require ("component")
 local bit32 = require ("bit32")
 local fs = require ("filesystem")
+local shell = require ("shell")
 
 local gpu = component.gpu
 local internet = component.internet
 
+local args, options = shell.parse (...)
+local command = args[1]
+
 -------------------------------------------
 
 -- Testing for opencomputers version
-if not gpu.assllocateBuffer then
+if not gpu.allocateBuffer then
     print ("LibVM requires opencomputers v1.7.6 or higher :c")
     print ("To check your opencomputers version, press escape => mod options, and find 'opencomputers'")
     return nil
@@ -103,7 +107,7 @@ local function loadPictureFromMemory (rawData)
 
     picture.buffer, reason = gpu.allocateBuffer (picture.sizeX, picture.sizeY)
     if not picture.buffer then
-        return nil, reason
+        return nil, "Failed to allocate v-ram buffer. Run this program with -f option to free all vram buffers, or with -n option to prevent program for allocation vram."
     end
 
     local function getPalleteColor (index) -- Do not be confused with gpu.getPalleteColor
@@ -156,21 +160,135 @@ local function loadPictureFromURL (url)
     return loadPictureFromMemory (rawData)
 end
 
+local function info (text)
+    if not options['q'] and not options['--quiet'] then
+        print (text)
+    end
+end
+
 -------------------------------------------
 
-local function main ()
-    gpu.releaseAllBuffers ()
+local function help ()
+    print ("Usage: get-libvm [COMMAND] [OPTIONS]")
+    print ("Commands:")
+    print ("  <no commands>: Install LibVM")
+    print ("  help: Get help")
+    print ("Options:")
+    print ("-q --quiet: Do not print or draw anything excluding errors")
+    print ("-f --free-vram: Free all vram-buffers before starting installation")
+    print ("-n --no-logo: Do not show LibVM logo and status, just print everything")
+end
 
-    local logo, reason = loadPictureFromURL ("https://github.com/Smok1e/oc-openos-libvm/blob/main/logo.lvmp?raw=true")
-    if not logo then
-        error (reason)
+local function install ()
+    info ("Starting LibVM installer...")
+
+    local logo, reason
+    if not options['n'] and not options['--no-logo'] then
+        logo, reason = loadPictureFromURL ("https://github.com/Smok1e/oc-openos-libvm/blob/main/logo.lvmp?raw=true")
+        if not logo then
+            print ("Failed to load LibVM logo: " .. reason)
+            return false
+        end
     end
 
-    local function status (text)
-        logo:draw ()
+    local resX, resY = gpu.getResolution ()
+    local function status (format, ...)
+        if options['q'] or options['quiet'] then
+            return nil
+        end
+        
+        if options['n'] or options['no-logo'] then
+            info (string.format (format, ...))
+            return nil
+        end
+
+        local x, y = resX/2-logo.sizeX/2, resY/2-logo.sizeY/2
+        logo:draw (x, y)
+
+        gpu.setBackground (0x000000)
+        gpu.setForeground (0xFFFFFF)
+        gpu.set (x, y+logo.sizeY-1, string.format (format, ...))
     end
 
-    logo:release ()
+    local function install (url, path)
+        status ("Downloading %s...", path)
+        local data, reason = download (url)
+        if not data then
+            if logo then
+                logo:release ()
+            end
+
+            error (reason)
+        end
+
+        local file, reason = fs.open (path, 'wb')
+        if not file then
+            if logo then
+                logo:release ()
+            end
+            error (reason)
+        end
+
+        file:write (data)
+        file:close ()
+    end
+
+    local function dir (path)
+        status ("Creating directory %s", path)
+
+        if not fs.isDirectory (path) then
+            if fs.exists (path) then
+                if logo then
+                    logo:release ()
+                end
+                error ("Failed to create directory '" .. path .. "', because it is an existing file. Delete this file and retry the installation")
+            end
+
+            fs.makeDirectory (path)
+        end
+    end
+
+    dir ("/usr")
+    dir ("/usr/bin")
+    dir ("/usr/lib")
+    dir ("/usr/lib/libvm")
+
+    install ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/libvm.lua", "/usr/lib/libvm.lua" )
+    install ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/libvm/libvm_crc32.lua", "/usr/lib/libvm/libvm_crc32.lua" )
+    install ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/libvm/libvm_virtual_machine.lua", "/usr/lib/libvm/libvm_virtual_machine.lua")
+    install ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/vm.lua", "/usr/bin/vm.lua")
+
+    status ("Installation complete")
+    if logo then
+        logo:release ()
+    end
+
+    info ("LibVM is installed succesfully!")
+end
+
+-------------------------------------------
+
+local function setCommand (cmd, func)
+    if command and command:lower () == cmd:lower () then
+        local lastActiveBuffer = gpu.getActiveBuffer ()
+        local result = {xpcall (func, debug.traceback)}
+        gpu.setActiveBuffer (lastActiveBuffer)
+        
+        if not result[1] then
+            component.gpu.setBackground (0x000000)
+            component.gpu.setForeground (0xFFFFFF)
+            print ("Runtime error")
+            print (result[2])
+        end
+        
+        return true
+    end
+    
+    return false
+end
+
+if not setCommand ("help", help) then
+    install ()
 end
 
 -------------------------------------------
