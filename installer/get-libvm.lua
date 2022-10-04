@@ -187,6 +187,17 @@ local function install ()
 
     info ("Starting LibVM installer...")
 
+    local screenBuffer, reason
+    if not options['n'] and not options['no-logo'] then
+        screenBuffer, reason = gpu.allocateBuffer ()
+
+        if not screenBuffer then
+            error ("Failed to allocate v-ram buffer. Run this program with -f option to free all vram buffers, or with -n option to prevent program for allocation vram.")
+        end
+        
+        gpu.bitblt (screenBuffer, nil, nil, nil, nil, 0)
+    end
+
     local logo, reason
     if not options['n'] and not options['--no-logo'] then
         logo, reason = loadPictureFromURL ("https://github.com/Smok1e/oc-openos-libvm/blob/main/logo.lvmp?raw=true")
@@ -194,6 +205,22 @@ local function install ()
             print ("Failed to load LibVM logo: " .. reason)
             return false
         end
+    end
+
+    local function release ()
+        if logo then
+            logo:release ()
+        end
+
+        if screenBuffer then 
+            gpu.bitblt (0, nil, nil, nil, nil, screenBuffer)
+            gpu.freeBuffer (screenBuffer)
+        end
+    end
+
+    local function throw (err)
+        release ()
+        error (err)
     end
 
     local resX, resY = gpu.getResolution ()
@@ -215,60 +242,49 @@ local function install ()
         gpu.set (x, y+logo.sizeY-1, string.format (format, ...))
     end
 
-    local function install (url, path)
+    local function downloadAndSave (url, path)
         status ("Downloading %s...", path)
         local data, reason = download (url)
         if not data then
-            if logo then
-                logo:release ()
-            end
-
-            error (reason)
+            throw (reason)
         end
 
         local file, reason = fs.open (path, 'wb')
         if not file then
-            if logo then
-                logo:release ()
-            end
-            error (reason)
+            throw (reason)
         end
 
         file:write (data)
         file:close ()
     end
 
-    local function dir (path)
+    local function mkdir (path)
         status ("Creating directory %s", path)
 
         if not fs.isDirectory (path) then
             if fs.exists (path) then
-                if logo then
-                    logo:release ()
-                end
-                error ("Failed to create directory '" .. path .. "', because it is an existing file. Delete this file and retry the installation")
+                throw ("Failed to create directory '" .. path .. "', because it is an existing file. Delete this file and retry the installation")
             end
 
             fs.makeDirectory (path)
         end
     end
 
-    dir ("/usr")
-    dir ("/usr/bin")
-    dir ("/usr/lib")
-    dir ("/usr/lib/libvm")
+    -- So all installation staff is here
+    mkdir ("/usr")
+    mkdir ("/usr/bin")
+    mkdir ("/usr/lib")
+    mkdir ("/usr/lib/libvm")
 
-    install ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/libvm.lua", "/usr/lib/libvm.lua" )
-    install ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/libvm/libvm_crc32.lua", "/usr/lib/libvm/libvm_crc32.lua" )
-    install ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/libvm/libvm_virtual_machine.lua", "/usr/lib/libvm/libvm_virtual_machine.lua")
-    install ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/vm.lua", "/usr/bin/vm.lua")
+    downloadAndSave ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/libvm.lua", "/usr/lib/libvm.lua" )
+    downloadAndSave ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/libvm/libvm_crc32.lua", "/usr/lib/libvm/libvm_crc32.lua" )
+    downloadAndSave ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/libvm/libvm_virtual_machine.lua", "/usr/lib/libvm/libvm_virtual_machine.lua")
+    downloadAndSave ("https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/vm.lua", "/usr/bin/vm.lua")
 
     status ("Installation complete")
-    if logo then
-        logo:release ()
-    end
 
-    info ("LibVM is installed succesfully!")
+    release ()
+    info ("LibVM has been installed succesfully!")
 end
 
 -------------------------------------------
