@@ -180,6 +180,11 @@ local function help ()
 end
 
 local function install ()
+    if options['f'] or options['free-vram'] then
+        info ("Freeing all vram buffers...")
+        gpu.freeAllBuffers ()
+    end
+
     info ("Starting LibVM installer...")
 
     local logo, reason
