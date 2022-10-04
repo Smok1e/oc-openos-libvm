@@ -1,4 +1,4 @@
-﻿local component = require ("component")
+local component = require ("component")
 local bit32 = require ("bit32")
 local fs = require ("filesystem")
 local shell = require ("shell")
