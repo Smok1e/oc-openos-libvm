@@ -15,7 +15,7 @@ libvm.INTERRUPTION_ERROR     = 5
 
 ------------------------------------------- Service functions
 
--- Prints arguments into game chat
+-- Prints it's arguments into game chat
 local function debugLog (...)
     local str = ""
     for _, value in pairs ({...}) do
@@ -51,7 +51,7 @@ local function readFile (path)
     return data
 end
 
--- Same as default require, but allows to pass the scope label and env to load ()
+-- Same as require but does not caching the module, allows to pass the scope label and env to load ()
 local function loadModule (path, label, env)
     checkArg (1, path,  "string"       )
     checkArg (2, label, "string", "nil")
@@ -152,12 +152,32 @@ local function virtualMachineStart (virtualMachine)
         return false
     end
 
+    -- Copying everything excluding component and computer APIs from lua global scope into the virtual machine environment
+    local env = {
+        computer = virtualMachine.computer.api,
+        component = virtualMachine.component.api,
+        unicode = require ("unicode"),
+        xpcall = function (executable, handler, ...) return virtualMachineEnvXpcall (virtualMachine, executable, handler, ...) end,
+        pcall  = function (executable,          ...) return virtualMachineEnvPcall  (virtualMachine, executable,          ...) end
+    }
+    env._G = env
+
+    for key, value in pairs (_G) do
+        if env[key] == nil then
+            env[key] = value
+        end
+    end    
+
     local eepromProxy = virtualMachine.component.api.proxy (eepromAddress)
-    local eepromExecutable, eepromSyntaxError = load (eepromProxy.get (), "=virtual_bios", "bt", virtualMachine.env)
+    local eepromExecutable, eepromSyntaxError = load (eepromProxy.get (), "=virtual_bios", "bt", env)
     if not eepromExecutable then
         virtualMachine:displayError ("bios loading failed: " .. eepromSyntaxError)
         return false
     end
+
+    file = fs.open ("/cyka.txt", "w")
+    file:write (serialization.serialize (virtualMachine.computer.eventQueue))
+    file:close ()
 
     local result, value = xpcall (eepromExecutable, debug.traceback)
     if not result then
@@ -185,23 +205,6 @@ function libvm.newVirtualMachine ()
     local virtualMachine, reason = loadModule ("/usr/lib/libvm/libvm_virtual_machine.lua", "=virtual_machine")
     if not virtualMachine then
         return nil, reason
-    end
-
-    -- Copying everything excluding component and computer APIs from lua global scope into the virtual machine environment
-    virtualMachine.env = {
-        computer = virtualMachine.computer.api,
-        component = virtualMachine.component.api,
-        unicode = require ("unicode"),
-        xpcall = function (executable, handler, ...) return virtualMachineEnvXpcall (virtualMachine, executable, handler, ...) end,
-        pcall  = function (executable,          ...) return virtualMachineEnvPcall  (virtualMachine, executable,          ...) end
-    }
-
-    virtualMachine.env._G = virtualMachine.env
-
-    for key, value in pairs (_G) do
-        if virtualMachine.env[key] == nil then
-            virtualMachine.env[key] = value
-        end
     end
 
     virtualMachine.release = virtualMachineRelease

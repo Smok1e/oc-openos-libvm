@@ -61,15 +61,15 @@ do
     vm.logPath = string.format ("%s/log_%s.log", logDirectory, os.date ("%d-%m-%Y_%H-%M-%S", calculateRealTime (vm.logTimezone)))
 end
 
-function vm.log (header, ...)
-    checkArg (1, header, "string")
+function vm.log (tag, ...)
+    checkArg (1, tag, "string")
 
     local handle, reason = fs.open (vm.logPath, "a")
     if not handle then
         error ("failed to open file '" .. vm.logPath .. "': " .. reason)
     end
 
-    fs.write (handle, string.format ("[%s] %-15s ", os.date ("%X", calculateRealTime (vm.logTimezone)), "<" .. header .. ">:"))
+    fs.write (handle, string.format ("[%s] %-15s ", os.date ("%X", calculateRealTime (vm.logTimezone)), "<" .. tag .. ">:"))
     for _, value in pairs ({...}) do
         fs.write (handle, string.format ("%-45s ", tostring (value)))
     end
@@ -79,8 +79,23 @@ function vm.log (header, ...)
 end
 
 function vm.interrupt (reason)
-   vm.interruptionReason = tostring (reason)
-   error ("libvm_interruption")
+    checkArg (1, reason, "string", "nil")
+
+    vm.interruptionReason = tostring (reason or "interrupt")
+    error ("libvm_interruption")
+end
+
+-- Draws a semipixel box for graphic interfaces
+local function drawSemipixelBorder (x, y, width, height)
+    checkArg (1, x,      "number")
+    checkArg (2, y,      "number")
+    checkArg (3, width,  "number")
+    checkArg (4, height, "number")
+
+    gpu.fill (x+1,       y,          width, 1,      '⣀')
+    gpu.fill (x+1,       y+height+1, width, 1,      '⠉')
+    gpu.fill (x,         y+1,        1,     height, '⢸')
+    gpu.fill (x+width+1, y+1,        1,     height, '⡇')    
 end
 
 ------------------------------------------- Components
@@ -164,6 +179,13 @@ function vm.component.releaseAll ()
     return count
 end
 
+-- Calls update function for each registered component
+function vm.component.update ()
+    for address, instance in pairs (vm.component.list) do
+        instance:update ()
+    end
+end
+
 ------------------------------------------- Component API
 
 vm.component.api = {}
@@ -184,7 +206,7 @@ function vm.component.api.type (address)
     return vm.component.getInstance (address).name
 end
 
-function vm.component.methods (address)
+function vm.component.api.methods (address)
     checkArg (1, address, "string")
     
     local instance = vm.component.getInstance (address)
@@ -228,6 +250,9 @@ function vm.component.api.invoke (address, method, ...)
         error ("no such method")
     end
 
+    if vm.logging then
+        vm.log ("Invoke", instance.name, method, ...)
+    end
     return instance[method] (instance, ...)
 end
 
@@ -237,18 +262,20 @@ function vm.component.api.list (filter, exact)
 
     local list = {}
     for address, instance in pairs (vm.component.list) do
-        if filter then
-            if exact then
-                if instance.name == filter then
-                    list[address] = instance.name
+        if instance.listable then
+            if filter then
+                if exact then
+                    if instance.name == filter then
+                        list[address] = instance.name
+                    end
+                else
+                    if string.find (instance.name, filter) then
+                        list[address] = instance.name
+                    end
                 end
             else
-                if string.find (instance.name, filter) then
-                    list[address] = instance.name
-                end
+                list[address] = instance.name
             end
-        else
-            list[address] = instance.name
         end
     end
 
@@ -314,22 +341,20 @@ function vm.computer.handleEvent (event)
             return true
         end
     end
-    
-    if eventType == "key_down" or eventType == "key_up" then
-        local key, alt = event[3], event[4]
-        if key == 0 and alt == 29 then -- Control key
-            vm.controlPressed = (eventType == "key_down")
-        elseif key == 99 then -- C key
-            vm.shouldInterrupt = (vm.controlPressed == true and eventType == "key_up")
-        end
-    end
+end
 
-    local eventType = event[1]
-    if eventType == "key_down" or
-       eventType == "key_up"   then
-        vm.computer.api.pushSignal (table.unpack (event))
-        return true
+function vm.computer.pushEvent (event)
+    checkArg (1, event, "table")
+    table.insert (vm.computer.eventQueue, event)
+
+    --[[local file = fs.open ("/pidor.txt", 'a') TODO: delete this shit
+    fs.write (file, "[PUSH] ")
+    local str = ""
+    for index, value in pairs (event) do
+        fs.write (file, tostring (value) .. " ")
     end
+    fs.write (file, "\n")
+    fs.close (file)    ]]
 end
 
 function vm.computer.popEvent (unpack)
@@ -337,6 +362,16 @@ function vm.computer.popEvent (unpack)
 
     if #vm.computer.eventQueue > 0 then
         local event = table.remove (vm.computer.eventQueue, #vm.computer.eventQueue)
+        
+        --[[local file = fs.open ("/pidor.txt", 'a') TODO: delete this shit
+        fs.write (file, "[POP] ")
+        local str = ""
+        for index, value in pairs (event) do
+            fs.write (file, tostring (value) .. " ")
+        end
+        fs.write (file, "\n")
+        fs.close (file)]]
+
         if unpack then
             return table.unpack (event)
         else
@@ -409,27 +444,20 @@ function vm.computer.api.getDeviceInfo ()
 
     info[vm.computer.address] = vm.computer.getDeviceInfo ()
     for address, instance in pairs (vm.component.list) do
-        info[address] = instance:getDeviceInfo ()
+        if instance.listable then        
+            info[address] = instance:getDeviceInfo ()
+        end
     end
 end
 
 function vm.computer.api.pushSignal (name, ...)
     checkArg (1, name, "string")
-    table.insert (vm.computer.eventQueue, {name, ...})
+    vm.computer.pushEvent ({name, ...})
 end
 
 function vm.computer.api.pullSignal (timeout)
     checkArg (1, timeout, "number", "nil")
-
-    if vm.shouldInterrupt then
-        error ("libvm_interrupt")
-    end
-
-    for index, instance in pairs (vm.component.list) do
-        if instance.name == 'screen' and instance.autoDisplay ~= true then
-            instance:display ()
-        end
-    end
+    vm.component.update ()
 
     local event
     if #vm.computer.eventQueue > 0 then
@@ -556,15 +584,22 @@ local function virtualComponentHandleEvent (virtualComponent, event)
     return false
 end
 
+
+-- Update function will be called before each call of computer.pullSignal
+local function virtualComponentUpdate (virtualComponent)
+end
+
 function vm.component.newVirtualComponent (componentName)
     local virtualComponent = {
         destructed = false, -- Used to avoid destructing an already destructed object
+        listable = true, -- If this value is set to false, component address will be not listed in component.list ()
         name = componentName,
         address = vm.component.generateComponentID (componentName),
 
         release = virtualComponentRelease,
         proxy = virtualComponentProxy,
         handleEvent = virtualComponentHandleEvent,
+        update = virtualComponentUpdate,
         getDeviceInfo = virtualComponentGetDeviceInfo
     }
 
@@ -950,11 +985,17 @@ local function virtualScreenHandleEvent (virtualScreen, event)
     end
 end
 
+local function virtualScreenUpdate (virtualScreen)
+    if not virtualScreen.autoDisplay then
+        virtualScreen:display ()
+    end
+end
+
 local function virtualScreenGetDeviceInfo (virtualScreen)
     return {
         vendor = vm.vendor,
         class = "display",
-        product = "CoolScreen model turbo",
+        product = "VirtualVision 400K Ultrawide Monitor",
         description = "libvm Virtual Text Screen"
     }
 end
@@ -966,10 +1007,7 @@ local function virtualScreenDisplay (virtualScreen)
 
     gpu.setBackground (0x000000)
     gpu.setForeground (virtualScreen.visualBorderColor)
-    gpu.fill (x+1,       y,         sizeX, 1,     '⣀')
-    gpu.fill (x+1,       y+sizeY+1, sizeX, 1,     '⠉')
-    gpu.fill (x,         y+1,       1,     sizeY, '⢸')
-    gpu.fill (x+sizeX+1, y+1,       1,     sizeY, '⡇')
+    drawSemipixelBorder (x, y, sizeX, sizeY)
 
     local lines = {}
     if not virtualScreen.power    then table.insert (lines, "Screen is turned off") end
@@ -1044,8 +1082,13 @@ local function virtualScreenGetAspectRatio (virtualScreen)
 end
 
 local function virtualScreenGetKeyboards (virtualScreen)
-    -- TODO: Return something...
-    return {}
+    local keyboards = {}
+    for address, instance in pairs (vm.component.list) do
+        table.insert (keyboards, address)
+    end
+
+    keyboards.n = #keyboards
+    return keyboards
 end 
 
 function vm.component.newVirtualScreen (x, y)
@@ -1065,6 +1108,7 @@ function vm.component.newVirtualScreen (x, y)
     virtualScreen.getVisualSize = virtualScreenGetVisualSize
     virtualScreen.release = virtualScreenRelease
     virtualScreen.handleEvent = virtualScreenHandleEvent
+    virtualScreen.update = virtualScreenUpdate
     virtualScreen.getDeviceInfo = virtualScreenGetDeviceInfo
 
     virtualScreen.setTouchModeInverted = virtualScreenSetTouchModeInverted
@@ -1386,7 +1430,7 @@ function vm.component.newVirtualEeprom (label)
 
     local virtualEeprom = vm.component.newVirtualComponent ("eeprom")
 
-    virtualEeprom.codeSizeLimit = math.huge
+    virtualEeprom.codeSizeLimit = math.huge -- TODO: 4096
     virtualEeprom.dataSizeLimit = 256
     virtualEeprom.labelSizeLimit = 24
     virtualEeprom.readonly = false
@@ -1411,6 +1455,136 @@ function vm.component.newVirtualEeprom (label)
     end
 
     return virtualEeprom
+end
+
+------------------------------------------- Keyboard
+
+local function virtualKeyboardGetDeviceInfo (virtualKeyboard)
+    return {
+        vendor = vm.vendor,
+        class = "input",
+        product = "Govnoklava 2560-GAMING",
+        description = "libvm Virtual Keyboard"
+    }
+end
+
+local function virtualKeyboardHandleEvent (virtualKeyboard, event)
+    if event[1] == "key_down" or event[1] == "key_up" or event[1] == "clipboard" then
+        event[2] = virtualKeyboard.address
+        vm.computer.api.pushSignal (table.unpack (event))
+    end
+end
+
+function vm.component.newVirtualKeyboard ()
+    local virtualKeyboard = vm.component.newVirtualComponent ("keyboard")
+    virtualKeyboard.getDeviceInfo = virtualKeyboardGetDeviceInfo
+    virtualKeyboard.handleEvent = virtualKeyboardHandleEvent
+    return virtualKeyboard
+end
+
+------------------------------------------- Internet card
+
+local function virtualInternetCardGetDeviceInfo (virtualInternetCard)
+    return {
+        vendor = vm.vendor,
+        class = "communication",
+        product = "VirtualLink 7G Ultraslim",
+        description = "libvm Virtual Internet Card"
+    }
+end
+
+function vm.component.newVirtualInternetCard ()
+    local internetCardAddress = component.list ("internet")()
+    if not internetCardAddress then
+        return nil, "no such component"
+    end
+
+    local virtualInternetCard = vm.component.newVirtualComponent ("internet")
+    virtualInternetCard.getDeviceInfo = virtualInternetCardGetDeviceInfo
+
+    -- Just passing any called method to real card
+    for method, direct in pairs (component.methods (internetCardAddress)) do
+        virtualInternetCard[method] = function (...)
+            return component.invoke (internetCardAddress, method, ...)
+        end
+    end
+
+    return virtualInternetCard
+end
+
+------------------------------------------- Machine UI
+
+local function machineInterfaceUpdate (machineInterface)
+    gpu.setBackground (0x000000)
+    gpu.setForeground (0x696969)
+    drawSemipixelBorder (machineInterface.x, machineInterface.y, machineInterface.sizeX, machineInterface.sizeY)
+
+    gpu.setBackground (0xE1E1E1)
+    gpu.fill (machineInterface.x+1, machineInterface.y+1, machineInterface.sizeX, machineInterface.sizeY, ' ')
+
+    for index, control in pairs (machineInterface.controls) do
+        gpu.set (machineInterface.x+1, machineInterface.y+index, control[1])
+    end
+end
+
+local function machineInterfaceHandleEvent (machineInterface, event)
+    local eventType = event[1]
+    if eventType == "touch" or eventType == "drag" then
+        local x, y = event[3], event[4]
+        if x >= machineInterface.x+1 and x < machineInterface.x+1+machineInterface.sizeX and y >= machineInterface.y+1 and y < machineInterface.y+1+machineInterface.sizeY then
+            local control = machineInterface.controls[y-machineInterface.y]
+            
+            gpu.setBackground (0x0075FF)
+            gpu.setForeground (0xFFFFFF)
+            gpu.fill (machineInterface.x+1, y, machineInterface.sizeX, 1, ' ')
+            gpu.set  (machineInterface.x+1, y, control[1])
+
+            os.sleep (0.1)
+
+            control[2] (machineInterface)
+            return true
+        end
+    end
+
+    return false
+end
+
+local function machineInterfaceControlShutdown (machineInterface)
+    vm.computer.api.shutdown (false)
+end
+
+local function machineInterfaceControlReboot (machineInterface)
+    vm.computer.api.shutdown (true)
+end
+
+local function machineInterfaceControlInterrupt (machineInterface)
+    vm.interrupt ()
+end
+
+function vm.component.newMachineInterface (x, y)
+    local machineInterface = vm.component.newVirtualComponent ("virtual_machine_interface")
+    machineInterface.listable = false
+    machineInterface.x = x
+    machineInterface.y = y
+
+    -- Clickable buttons
+    machineInterface.controls = {
+        {"shutdown",  machineInterfaceControlShutdown },
+        {"reboot",    machineInterfaceControlReboot   },
+        {"interrupt", machineInterfaceControlInterrupt}
+    }
+
+    machineInterface.sizeX, machineInterface.sizeY = 0, #machineInterface.controls
+    for _, control in pairs (machineInterface.controls) do
+        if #control[1] > machineInterface.sizeX then
+            machineInterface.sizeX = #control[1]
+        end
+    end
+
+    machineInterface.update = machineInterfaceUpdate
+    machineInterface.handleEvent = machineInterfaceHandleEvent
+
+    return machineInterface
 end
 
 -------------------------------------------

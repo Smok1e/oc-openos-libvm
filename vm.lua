@@ -8,22 +8,34 @@ local libvm     = require ("libvm")
 local component = require ("component")
 local shell     = require ("shell")
 
+local gpu = component.gpu
+
 local args, options = shell.parse (...)
 local command = args[1]
+
+-------------------------------------------
+
+local function info (...)
+    if not options['q'] and not options['quiet'] then
+        print (...)
+    end
+end
 
 -------------------------------------------
 
 local function help ()
     print ("Usage: vm [COMMAND] [OPTIONS]")
     print ("Commands:")
-    print (" run: Run virtual machine")
-    print (" help: Get help")
+    print ("  run: Run virtual machine")
+    print ("  help: Get help")
     print ("Options:")
-    print (" -l --logging: Enable debug logging")
-    print (" -d --auto-display: Update virtual screen instantly (after each gpu operation)")
-    print ("    --resolution=WIDTHxHEIGHT: Override virtual gpu resolution")
-    print ("    --bios=FILENAME: Override virtual bios source filename")
-    print (" -f --free-vram: Free all gpu buffers before running machine")
+    print ("  -q --quiet: Do not print anything")
+    print ("  -l --logging: Save degub log (events, proxy calls, etc)")
+    print ("  -d --auto-display: Update virtual screen instantly (after each gpu operation)")
+    print ("  -r --resolution=WIDTHxHEIGHT: Override virtual gpu resolution")
+    print ("  -b --bios=FILENAME: Override virtual bios source file")
+    print ("  -n --no-buffer: Do not save screen buffer before running machine")
+    print ("  -f --free-vram: Free all gpu buffers before running machine")
 end
 
 -------------------------------------------
@@ -38,27 +50,27 @@ local function run ()
     local autoDisplay = options['d'] or options['auto-display'] or false
     local resX = 100
     local resY = 40
-    local biosFilename = options['bios'] or "mineos_efi.lua"
-    local mainFilesystemRoot = "mineos/"
+    local biosFilename = options['bios'] or options['b'] or "bios.lua"
+    local mainFilesystemRoot = "filesystem/"
     local tmpFilesystemRoot = "tmpfs/"
     local virtualMachineDirectory = "/home/VirtualMachine1/"
 
     if loggingEnabled then
-        print ("Logging enabled; Log will be saved as '" .. machine.logPath .. "'")
-        logEnabled = true
+        info ("Logging enabled; Log will be saved as '" .. machine.logPath .. "'")
+        machine.logging = true
     end
 
     if autoDisplay then
-        print ("Screen changes will be displayed instantly")
+        info ("Screen changes will be displayed instantly")
     end
     
-    if options['resolution'] then
-        local optionResX, optionResY = string.match (options['resolution'], "(%d+)x(%d+)")
+    if options['resolution'] or options['r'] then
+        local optionResX, optionResY = string.match (options['resolution'] or options['r'], "(%d+)x(%d+)")
         optionResX = tonumber (optionResX or nil)
         optionResY = tonumber (optionResY or nil)
 
         if not optionResX or not optionResY then
-            print (string.format ("Invalid resolution option value: %s; Used default resolution: %dx%d", options['resolution'], resX, resY))
+            info (string.format ("Invalid resolution option value: %s; Used default resolution: %dx%d", options['resolution'], resX, resY))
         else
             resX = optionResX
             resY = optionResY
@@ -67,15 +79,22 @@ local function run ()
 
     if options['f'] or options['free-vram'] then
         component.gpu.freeAllBuffers ()
-        print ("All GPU vram buffers freed")
+        info ("All GPU vram buffers freed")
     end
 
     local actualResX, actualResY = component.gpu.getResolution ()
+    local screenPosX, screenPosY = actualResX/2-resX/2-1, actualResY/2-resY/2
 
-    print ("Initializing machine")
+    info ("Initializing machine")
     machine.component.newVirtualGpu (resX, resY)
-    machine.component.newVirtualScreen (actualResX/2-resX/2-1, actualResY/2-resY/2)
-    machine.component.newVirtualFilesystem (virtualMachineDirectory .. "/" .. mainFilesystemRoot, "main volume")
+    machine.component.newVirtualKeyboard ()
+    machine.component.newVirtualInternetCard ()
+
+    screen = machine.component.newVirtualScreen (screenPosX, screenPosY)
+    screen.autoDisplay = autoDisplay
+    
+    main_volume = machine.component.newVirtualFilesystem (virtualMachineDirectory .. "/" .. mainFilesystemRoot, "main volume")
+    machine.computer.api.setBootAddress (main_volume.address)
     
     local result, reason = machine.component.newVirtualEeprom ():loadFromFile (virtualMachineDirectory .. "/" .. biosFilename)
     if not result then
@@ -86,12 +105,25 @@ local function run ()
     
     tmpfs = machine.component.newVirtualFilesystem (virtualMachineDirectory .. "/" .. tmpFilesystemRoot, "tmpfs")
     machine.computer.setTmpAddress (tmpfs.address)
+    
+    machine.component.newMachineInterface (screen.visualPositionX - 12, screen.visualPositionY)
 
-    print ("Starting machine")
+    info ("Starting machine")
+
+    local screenBuffer, reason
+    if not options['n'] and not options['no-buffer'] then
+        screenBuffer, reason = gpu.allocateBuffer ()
+        if screenBuffer then
+            gpu.bitblt (screenBuffer)
+        else
+            info ("Failed to allocate screen buffer: " .. reason)
+        end
+    end
+
     local exitCode, exitMessage
     repeat
         if exitCode == libvm.INTERRUPTION_REBOOT then
-            print ("Rebooting machine")
+            info ("Rebooting machine")
         end
 
         exitCode, exitMessage = machine:start ()
@@ -99,8 +131,13 @@ local function run ()
         component.gpu.setBackground (0x000000)
     until exitCode ~= libvm.INTERRUPTION_REBOOT
 
+    if screenBuffer then
+        gpu.bitblt (0, 1, 1, actualResX, actualResY, screenBuffer)
+        gpu.freeBuffer (screenBuffer)
+    end
+
     machine:release ()
-    print (string.format ("Machine stopped with exit code 0x%04X: %s", exitCode, exitMessage))
+    info (string.format ("Machine stopped with exit code 0x%04X: %s", exitCode, exitMessage))
 end
 
 -------------------------------------------
