@@ -343,35 +343,11 @@ function vm.computer.handleEvent (event)
     end
 end
 
-function vm.computer.pushEvent (event)
-    checkArg (1, event, "table")
-    table.insert (vm.computer.eventQueue, event)
-
-    --[[local file = fs.open ("/pidor.txt", 'a') TODO: delete this shit
-    fs.write (file, "[PUSH] ")
-    local str = ""
-    for index, value in pairs (event) do
-        fs.write (file, tostring (value) .. " ")
-    end
-    fs.write (file, "\n")
-    fs.close (file)    ]]
-end
-
 function vm.computer.popEvent (unpack)
     checkArg (1, unpack, "boolean", "nil")
 
     if #vm.computer.eventQueue > 0 then
         local event = table.remove (vm.computer.eventQueue, #vm.computer.eventQueue)
-        
-        --[[local file = fs.open ("/pidor.txt", 'a') TODO: delete this shit
-        fs.write (file, "[POP] ")
-        local str = ""
-        for index, value in pairs (event) do
-            fs.write (file, tostring (value) .. " ")
-        end
-        fs.write (file, "\n")
-        fs.close (file)]]
-
         if unpack then
             return table.unpack (event)
         else
@@ -452,7 +428,7 @@ end
 
 function vm.computer.api.pushSignal (name, ...)
     checkArg (1, name, "string")
-    vm.computer.pushEvent ({name, ...})
+    table.insert (vm.computer.eventQueue, {name, ...})
 end
 
 function vm.computer.api.pullSignal (timeout)
@@ -584,7 +560,6 @@ local function virtualComponentHandleEvent (virtualComponent, event)
     return false
 end
 
-
 -- Update function will be called before each call of computer.pullSignal
 local function virtualComponentUpdate (virtualComponent)
 end
@@ -592,7 +567,7 @@ end
 function vm.component.newVirtualComponent (componentName)
     local virtualComponent = {
         destructed = false, -- Used to avoid destructing an already destructed object
-        listable = true, -- If this value is set to false, component address will be not listed in component.list ()
+        listable = true, -- If this value set to false, component address will not be listed in component.list ()
         name = componentName,
         address = vm.component.generateComponentID (componentName),
 
@@ -727,8 +702,8 @@ local function virtualGpuSetBackground (virtualGpu, value, palette)
     checkArg (1, value,   "number"        )
     checkArg (2, palette, "boolean", "nil")
 
-    -- Опытным путём я выяснил, что background и foreground привязаны к vram-буферу
-    -- По этому можно не кешировать эти параметры и полагаться полностью на видеопамять
+    -- Эмпирическим путём выяснилось, что background и foreground привязаны к vram-буферу,
+    -- поэтому подобные параметры можно не кешировать, полностью полагаясь на видеопамять
     return virtualGpu:execute ("setBackground", value, palette)
 end
 
@@ -1090,7 +1065,7 @@ local function virtualScreenGetKeyboards (virtualScreen)
     keyboards.n = #keyboards
     return keyboards
 end 
-
+        
 function vm.component.newVirtualScreen (x, y)
     local virtualScreen = vm.component.newVirtualComponent ("screen")
 
@@ -1430,7 +1405,7 @@ function vm.component.newVirtualEeprom (label)
 
     local virtualEeprom = vm.component.newVirtualComponent ("eeprom")
 
-    virtualEeprom.codeSizeLimit = math.huge -- TODO: 4096
+    virtualEeprom.codeSizeLimit = math.huge
     virtualEeprom.dataSizeLimit = 256
     virtualEeprom.labelSizeLimit = 24
     virtualEeprom.readonly = false
@@ -1587,6 +1562,6 @@ function vm.component.newMachineInterface (x, y)
     return machineInterface
 end
 
--------------------------------------------
+------------------------------------------- Кто прочитал тот лох)))0
 
 return vm
