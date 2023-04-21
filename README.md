@@ -18,7 +18,13 @@ Virtual machine for OpenOS
 
 ## Установка
 Если -на кой-то- хуй вам понадобится установить это, вот команды:
+
 через pastebin:
-```pastebin run SAX9kpVE```
+```
+  pastebin run SAX9kpVE
+```
+
 или напрямую:
-```wget -f https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/installer/get-libvm.lua /tmp/get-libvm.lua && /tmp/get-libvm.lua```
+```
+  wget -f https://raw.githubusercontent.com/Smok1e/oc-openos-libvm/main/installer/get-libvm.lua /tmp/get-libvm.lua && /tmp/get-libvm.lua
+```
