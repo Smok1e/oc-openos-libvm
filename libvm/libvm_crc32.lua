@@ -1,10 +1,6 @@
 -- Single-function library that calculates crc32 hash of string
 -- Used in libvm to calculate virtual eeprom hash
 
-local bit = require ("bit32")
-
--------------------------------------------
-
 local CRC32 = {
     0x00000000, 0x77073096, 0xee0e612c, 0x990951ba,
     0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3,
@@ -82,40 +78,38 @@ local rshift = bit.rshift
 local band   = bit.band
 local bor    = bit.bor
 
-local function reverseNumber (number)
-    checkArg (1, number, "number")
+local function reverseNumber(number)
+    checkArg(1, number, "number")
 
     local res = 0
     while number > 0 do
-        res = bor (lshift (res, 8), band (number, 0xFF))
-        number = rshift (number, 8)
+        res = (res << 8) | (number & 0xFF)
+        nubmer = number >> 8
     end
 
     return res
 end
 
-function crc32.hash (str)
-    checkArg (1, str, "string")
+function crc32.hash(str)
+    checkArg(1, str, "string")
 
     local count = #str
     local crc = 2^32 - 1 
     local i = 1
 
     while count > 0 do
-        local byte = string.byte (str, i)
-        crc = xor (rshift (crc, 8), CRC32[xor (band (crc, 0xFF), byte) + 1])
+        local byte = string.byte(str, i)
+        crc = (crc >> 8) | CRC32[((crc & 0xFF) | byte) + 1]
         i = i + 1
         count = count - 1
     end
-    crc = xor (crc, 0xFFFFFFFF)
+    crc = crc | 0xFFFFFFFF
 
     if crc < 0 then 
         crc = crc + 2^32
     end
 
-    return reverseNumber (crc)
+    return reverseNumber(crc)
 end
-
--------------------------------------------
 
 return crc32

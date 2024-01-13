@@ -3,13 +3,13 @@
 -- In simple words, it is `machine.lua`, but virtual.
 -- WARNING! By reading this code, you can get schizophrenia
 
-local component = require ("component")
-local computer  = require ("computer")
-local crc32     = require ("libvm/libvm_crc32")
+local component = require("component")
+local computer  = require("computer")
+local crc32     = require("libvm/libvm_crc32")
 
 local gpu   = component.gpu
-local fs    = component.proxy (computer.getBootAddress ())
-local tmpfs = component.proxy (computer.tmpAddress     ())
+local fs    = component.proxy(computer.getBootAddress())
+local tmpfs = component.proxy(computer.tmpAddress    ())
 
 ------------------------------------------- Initializing, service functions
 
@@ -21,81 +21,81 @@ vm.logDirectory = "/etc"
 vm.logging = false -- Set this variable to true to enable virtual machine logging
 
 -- Used for unrealized yet functions
-local function stub () end
+local function stub() end
 
 -- Returns current timestamp
-local function getRealTime ()
-    local handle, reason = tmpfs.open ("timestamp", "w")
+local function getRealTime()
+    local handle, reason = tmpfs.open("timestamp", "w")
     if not handle then
-        error ("failed to open " .. reason)
+        error("failed to open " .. reason)
     end
 
-    tmpfs.close (handle)
+    tmpfs.close(handle)
     
     -- Simple hack for opencomputers: filesystem.lastModified returns real timestamp of last file modification
-    -- os.date uses timestamp as seconds (fucking lua), so we need to divide it to 1000
-    local timestamp = tmpfs.lastModified ("timestamp") / 1000
-    tmpfs.remove ("timestamp")
+    -- os.date uses timestamp as seconds(fucking lua), so we need to divide it to 1000
+    local timestamp = tmpfs.lastModified("timestamp") / 1000
+    tmpfs.remove("timestamp")
 
     return timestamp
 end
 
 -- Initializing time
-vm.initUptime = computer.uptime ()
-vm.initRealTime = getRealTime ()
+vm.initUptime = computer.uptime()
+vm.initRealTime = getRealTime()
 
 -- Not to be confused with getRealTime. calculateRealTime returs timestamp based on last synchronized real time and computer.uptime
 -- Use this function instead of getRealTime for optimization
-local function calculateRealTime (timezone)
-    checkArg (1, timezone, "number", "nil")
-    return vm.initRealTime + computer.uptime () - vm.initUptime + ((timezone or 0) / 1000)
+local function calculateRealTime(timezone)
+    checkArg(1, timezone, "number", "nil")
+    return vm.initRealTime + computer.uptime() - vm.initUptime +((timezone or 0) / 1000)
 end
 
 -- Initializing logging
 do
     local logDirectory = vm.logDirectory .. "/libvm-logs"
-    if not fs.isDirectory (logDirectory) then
-        assert (fs.makeDirectory (logDirectory), "failed to create libvm log directory; perhaps " .. logDirectory .. " is an existing file")
+    if not fs.isDirectory(logDirectory) then
+        assert(fs.makeDirectory(logDirectory), "failed to create libvm log directory; perhaps " .. logDirectory .. " is an existing file")
     end
 
-    vm.logPath = string.format ("%s/log_%s.log", logDirectory, os.date ("%d-%m-%Y_%H-%M-%S", calculateRealTime (vm.logTimezone)))
+    vm.logPath = string.format("%s/log_%s.log", logDirectory, os.date("%d-%m-%Y_%H-%M-%S", calculateRealTime(vm.logTimezone)))
 end
 
-function vm.log (tag, ...)
-    checkArg (1, tag, "string")
+function vm.log(tag, ...)
+    checkArg(1, tag, "string")
 
-    local handle, reason = fs.open (vm.logPath, "a")
+    local handle, reason = fs.open(vm.logPath, "a")
     if not handle then
-        error ("failed to open file '" .. vm.logPath .. "': " .. reason)
+        error("failed to open file '" .. vm.logPath .. "': " .. reason)
     end
 
-    fs.write (handle, string.format ("[%s] %-15s ", os.date ("%X", calculateRealTime (vm.logTimezone)), "<" .. tag .. ">:"))
-    for _, value in pairs ({...}) do
-        fs.write (handle, string.format ("%-45s ", tostring (value)))
+    fs.write(handle, string.format("[%s] %-15s ", os.date("%X", calculateRealTime(vm.logTimezone)), "<" .. tag .. ">:"))
+    for _, value in pairs({...}) do
+        fs.write(handle, string.format("%-45s ", tostring(value)))
     end
     
-    fs.write (handle, "\n")
-    fs.close (handle)
+    fs.write(handle, "\n")
+    fs.close(handle)
 end
 
-function vm.interrupt (reason)
-    checkArg (1, reason, "string", "nil")
+function vm.interrupt(reason)
+    checkArg(1, reason, "string", "nil")
 
-    vm.interruptionReason = tostring (reason or "interrupt")
-    error ("libvm_interruption")
+    vm.interruptionReason = tostring(reason or "interrupt")
+    error("libvm_interruption")
 end
 
 -- Draws a semipixel box for graphic interfaces
-local function drawSemipixelBorder (x, y, width, height)
-    checkArg (1, x,      "number")
-    checkArg (2, y,      "number")
-    checkArg (3, width,  "number")
-    checkArg (4, height, "number")
+local function drawSemipixelBorder(x, y, width, height)
+    checkArg(1, x,      "number")
+    checkArg(2, y,      "number")
+    checkArg(3, width,  "number")
+    checkArg(4, height, "number")
 
-    gpu.fill (x+1,       y,          width, 1,      '⣀')
-    gpu.fill (x+1,       y+height+1, width, 1,      '⠉')
-    gpu.fill (x,         y+1,        1,     height, '⢸')
-    gpu.fill (x+width+1, y+1,        1,     height, '⡇')    
+    gpu.fill(x+1,       y,          width, 1,      '⣀')
+    gpu.fill(x+1,       y+height+1, width, 1,      '⠉')
+    gpu.fill(x,         y+1,        1,     height, '⢸')
+    gpu.fill(x+width+1, y+1,        1,     height, '⡇')    
 end
 
 ------------------------------------------- Components
@@ -103,55 +103,55 @@ end
 vm.component = {}
 vm.component.list = {}
 
-function vm.component.generateComponentID (componentName)
-    checkArg (1, componentName, "string")
+function vm.component.generateComponentID(componentName)
+    checkArg(1, componentName, "string")
 
     local id = "libvm-virtual-" .. componentName .. "-"
     for i = 1, 8 do
-        id = id .. string.char (math.random (string.byte ('0'), string.byte ('9')))
+        id = id .. string.char(math.random(string.byte('0'), string.byte('9')))
     end
     
     id = id .. '-'
     for i = 1, 8 do
-        id = id .. string.char (math.random (string.byte ('a'), string.byte ('z')))
+        id = id .. string.char(math.random(string.byte('a'), string.byte('z')))
     end
 
     return id
 end
 
-function vm.component.registerVirtualComponent (instance)
-    checkArg (1, instance, "table")
+function vm.component.registerVirtualComponent(instance)
+    checkArg(1, instance, "table")
     if vm.component.list[instance.address] then
-        error ("component exists")
+        error("component exists")
     end
     
     vm.component.list[instance.address] = instance 
-    vm.computer.api.pushSignal ("component_added", instance.address, instance.name)
+    vm.computer.api.pushSignal("component_added", instance.address, instance.name)
     return instance
 end
 
-function vm.component.deleteVirtualComponent (instance)
-    checkArg (1, instance, "table", "table")
+function vm.component.deleteVirtualComponent(instance)
+    checkArg(1, instance, "table", "table")
     if not vm.component.list[instance.address] then
-        error ("no such component")
+        error("no such component")
     end
 
     vm.component.list[instance.address] = nil
-    vm.computer.api.pushSignal ("component_removed", instance.address, instance.name)
+    vm.computer.api.pushSignal("component_removed", instance.address, instance.name)
     return true
 end
 
--- If <noexcept> is not false or nil, calls error if such component does not exist
-function vm.component.getInstance (address, noexcept)
-    checkArg (1, address,  "string",  "nil")
-    checkArg (1, noexcept, "boolean", "nil")
+-- If <noexcept> is not false or nil, throws an error if such component does not exist
+function vm.component.getInstance(address, noexcept)
+    checkArg(1, address,  "string",  "nil")
+    checkArg(1, noexcept, "boolean", "nil")
 
     if not address then
         if noexcept then
             return nil, "no such component"
         end
 
-        error ("no such component")
+        error("no such component")
     end
 
     local instance = vm.component.list[address]
@@ -160,7 +160,7 @@ function vm.component.getInstance (address, noexcept)
             return nil, "no such component"
         end
 
-        error ("no such component")
+        error("no such component")
     end
 
     return instance
@@ -168,10 +168,10 @@ end
 
 -- Calls release function for each registered (i. e. created) virtual component
 -- Returns count of objects that wasn't released yet
-function vm.component.releaseAll ()
+function vm.component.releaseAll()
     local count = 0
-    for address, instance in pairs (vm.component.list) do
-        if instance:release () then
+    for address, instance in pairs(vm.component.list) do
+        if instance:release() then
             count = count+1
         end
     end
@@ -180,9 +180,9 @@ function vm.component.releaseAll ()
 end
 
 -- Calls update function for each registered component
-function vm.component.update ()
-    for address, instance in pairs (vm.component.list) do
-        instance:update ()
+function vm.component.update()
+    for address, instance in pairs(vm.component.list) do
+        instance:update()
     end
 end
 
@@ -190,29 +190,29 @@ end
 
 vm.component.api = {}
 
-function vm.component.api.slot (address)
-    checkArg (1, address, "string")
+function vm.component.api.slot(address)
+    checkArg(1, address, "string")
     if not vm.component.list[address] then
-        error ("no such component")
+        error("no such component")
     end
 
-    -- -1 is value returned by original component.slot function when component is external (keyboard, screen, holo, etc).
+    -- -1 is value returned by original component.slot function when component is external(keyboard, screen, holo, etc).
     -- So we also do this cause all of our components are virtual
     return -1
 end
 
-function vm.component.api.type (address)
-    checkArg (1, address, "string")
-    return vm.component.getInstance (address).name
+function vm.component.api.type(address)
+    checkArg(1, address, "string")
+    return vm.component.getInstance(address).name
 end
 
-function vm.component.api.methods (address)
-    checkArg (1, address, "string")
+function vm.component.api.methods(address)
+    checkArg(1, address, "string")
     
-    local instance = vm.component.getInstance (address)
+    local instance = vm.component.getInstance(address)
     local methods = {}
-    for key, method in pairs (instance) do
-        if type (method) == "function" then
+    for key, method in pairs(instance) do
+        if type(method) == "function" then
             methods[key] = true
         end
     end
@@ -220,13 +220,13 @@ function vm.component.api.methods (address)
     return methods
 end
 
-function vm.component.api.fields (address)
-    checkArg (1, address, "string")
+function vm.component.api.fields(address)
+    checkArg(1, address, "string")
     
-    local instance = vm.component.getInstance (address)
+    local instance = vm.component.getInstance(address)
     local fields = {}
-    for key, field in pairs (instance) do
-        if type (field) ~= "function" then
+    for key, field in pairs(instance) do
+        if type(field) ~= "function" then
             fields[key] = true
         end
     end
@@ -234,34 +234,34 @@ function vm.component.api.fields (address)
     return fields
 end
 
-function vm.component.api.doc (address, method)
-    checkArg (1, address, "string")
-    checkArg (2, method,  "string")
+function vm.component.api.doc(address, method)
+    checkArg(1, address, "string")
+    checkArg(2, method,  "string")
 
     return "Virtual component documentation is not yet implemented. Use original component api to get documentation"
 end
 
-function vm.component.api.invoke (address, method, ...)
-    checkArg (1, address, "string")
-    checkArg (2, method,  "string")
+function vm.component.api.invoke(address, method, ...)
+    checkArg(1, address, "string")
+    checkArg(2, method,  "string")
 
-    local instance = vm.component.getInstance (address)
+    local instance = vm.component.getInstance(address)
     if not instance[method] then
-        error ("no such method")
+        error("no such method")
     end
 
     if vm.logging then
-        vm.log ("Invoke", instance.name, method, ...)
+        vm.log("Invoke", instance.name, method, ...)
     end
-    return instance[method] (instance, ...)
+    return instance[method](instance, ...)
 end
 
-function vm.component.api.list (filter, exact)
-    checkArg (1, filter, "string",  "nil")
-    checkArg (2, exact,  "boolean", "nil")
+function vm.component.api.list(filter, exact)
+    checkArg(1, filter, "string",  "nil")
+    checkArg(2, exact,  "boolean", "nil")
 
     local list = {}
-    for address, instance in pairs (vm.component.list) do
+    for address, instance in pairs(vm.component.list) do
         if instance.listable then
             if filter then
                 if exact then
@@ -269,7 +269,7 @@ function vm.component.api.list (filter, exact)
                         list[address] = instance.name
                     end
                 else
-                    if string.find (instance.name, filter) then
+                    if string.find(instance.name, filter) then
                         list[address] = instance.name
                     end
                 end
@@ -280,9 +280,9 @@ function vm.component.api.list (filter, exact)
     end
 
     local key = nil
-    return setmetatable (list, {
-        __call = function ()
-            key = next (list, key)
+    return setmetatable(list, {
+        __call = function()
+            key = next(list, key)
             if key then
                 return key, list[key]
             end
@@ -290,23 +290,23 @@ function vm.component.api.list (filter, exact)
     })
 end
 
-function vm.component.api.proxy (address)
-    checkArg (1, address, "string")
+function vm.component.api.proxy(address)
+    checkArg(1, address, "string")
     
-    local instance, reason = vm.component.getInstance (address, true)
+    local instance, reason = vm.component.getInstance(address, true)
     if not instance then
         return nil, reason
     end
 
-    return instance:proxy ()
+    return instance:proxy()
 end
 
-function vm.component.api.get (address, componentType)
-    checkArg (1, address,       "string"       )
-    checkArg (2, componentType, "string", "nil")
+function vm.component.api.get(address, componentType)
+    checkArg(1, address,       "string"       )
+    checkArg(2, componentType, "string", "nil")
 
-    for existingAddress, instance in pairs (vm.component.list) do
-        if existingAddress:find (address) then
+    for existingAddress, instance in pairs(vm.component.list) do
+        if existingAddress:find(address) then
             if componentType then
                 if instance.name == componentType then
                     return existingAddress
@@ -325,38 +325,38 @@ end
 ------------------------------------------- Computer
 
 vm.computer = {}
-vm.computer.address = vm.component.generateComponentID ("computer")
-vm.computer.startTime = computer.uptime ()
+vm.computer.address = vm.component.generateComponentID("computer")
+vm.computer.startTime = computer.uptime()
 vm.computer.eventQueue = {}
 
-function vm.computer.handleEvent (event)
-    checkArg (1, event, "table")
+function vm.computer.handleEvent(event)
+    checkArg(1, event, "table")
 
     if #event < 1 then
         return false
     end
 
-    for address, instance in pairs (vm.component.list) do
-        if instance:handleEvent (event) then
+    for address, instance in pairs(vm.component.list) do
+        if instance:handleEvent(event) then
             return true
         end
     end
 end
 
-function vm.computer.popEvent (unpack)
-    checkArg (1, unpack, "boolean", "nil")
+function vm.computer.popEvent(unpack)
+    checkArg(1, unpack, "boolean", "nil")
 
     if #vm.computer.eventQueue > 0 then
-        local event = table.remove (vm.computer.eventQueue, #vm.computer.eventQueue)
+        local event = table.remove(vm.computer.eventQueue, #vm.computer.eventQueue)
         if unpack then
-            return table.unpack (event)
+            return table.unpack(event)
         else
             return event
         end
     end
 end
 
-function vm.computer.getDeviceInfo ()
+function vm.computer.getDeviceInfo()
     return {
         vendor = vm.vendor,
         class = "system",
@@ -365,8 +365,8 @@ function vm.computer.getDeviceInfo ()
     }
 end
 
-function vm.computer.setTmpAddress (address)
-    checkArg (1, address, "string")
+function vm.computer.setTmpAddress(address)
+    checkArg(1, address, "string")
     if not vm.component.list[address] or vm.component.list[address].name ~= "filesystem" then
         return false, "no such component"
     end
@@ -379,133 +379,133 @@ end
 
 vm.computer.api = {}
 
-function vm.computer.api.uptime ()
-    return computer.uptime () - vm.computer.startTime
+function vm.computer.api.uptime()
+    return computer.uptime() - vm.computer.startTime
 end
 
-function vm.computer.api.users ()
+function vm.computer.api.users()
     return {} -- TODO: Implement user list
 end
 
-function vm.computer.api.addUser ()
+function vm.computer.api.addUser()
     return false
 end
 
-function vm.computer.api.setArchitecture (architecture)
-    checkArg (1, architecture, "string")
+function vm.computer.api.setArchitecture(architecture)
+    checkArg(1, architecture, "string")
     return false
 end
 
-function vm.computer.api.getArchitecture ()
-    return computer.getArchitecture ()
+function vm.computer.api.getArchitecture()
+    return computer.getArchitecture()
 end
 
-function vm.computer.api.getArchitectures ()
+function vm.computer.api.getArchitectures()
     return {
-        computer.getArchitecture (),
+        computer.getArchitecture(),
         n = 1
     }
 end
 
-function vm.computer.api.totalMemory ()
-    return computer.totalMemory ()
+function vm.computer.api.totalMemory()
+    return computer.totalMemory()
 end
 
-function vm.computer.api.freeMemory ()
-    return computer.freeMemory ()
+function vm.computer.api.freeMemory()
+    return computer.freeMemory()
 end
 
-function vm.computer.api.getDeviceInfo ()
+function vm.computer.api.getDeviceInfo()
     info = {}
 
-    info[vm.computer.address] = vm.computer.getDeviceInfo ()
-    for address, instance in pairs (vm.component.list) do
+    info[vm.computer.address] = vm.computer.getDeviceInfo()
+    for address, instance in pairs(vm.component.list) do
         if instance.listable then        
-            info[address] = instance:getDeviceInfo ()
+            info[address] = instance:getDeviceInfo()
         end
     end
 end
 
-function vm.computer.api.pushSignal (name, ...)
-    checkArg (1, name, "string")
-    table.insert (vm.computer.eventQueue, {name, ...})
+function vm.computer.api.pushSignal(name, ...)
+    checkArg(1, name, "string")
+    table.insert(vm.computer.eventQueue, {name, ...})
 end
 
-function vm.computer.api.pullSignal (timeout)
-    checkArg (1, timeout, "number", "nil")
-    vm.component.update ()
+function vm.computer.api.pullSignal(timeout)
+    checkArg(1, timeout, "number", "nil")
+    vm.component.update()
 
     local event
     if #vm.computer.eventQueue > 0 then
-        event = vm.computer.popEvent ()
+        event = vm.computer.popEvent()
     else
-        vm.computer.handleEvent ({computer.pullSignal (timeout)})
-        event = vm.computer.popEvent ()
+        vm.computer.handleEvent({computer.pullSignal(timeout)})
+        event = vm.computer.popEvent()
     end
 
     if event then
         if vm.logging then
-            vm.log ("Event", table.unpack (event))
+            vm.log("Event", table.unpack(event))
         end
 
-        return table.unpack (event)
+        return table.unpack(event)
     end
 end
 
-function vm.computer.api.beep (...)
-    return computer.beep (...)
+function vm.computer.api.beep(...)
+    return computer.beep(...)
 end
 
-function vm.computer.api.energy (...)
-    return computer.energy (...)
+function vm.computer.api.energy(...)
+    return computer.energy(...)
 end
 
-function vm.computer.api.maxEnergy (...)
-    return computer.maxEnergy (...)
+function vm.computer.api.maxEnergy(...)
+    return computer.maxEnergy(...)
 end
 
-function vm.computer.api.shutdown (reboot)
-    checkArg (1, reboot, "boolean", "nil")
+function vm.computer.api.shutdown(reboot)
+    checkArg(1, reboot, "boolean", "nil")
 
     -- Intentionally throws an error that interrupts virtual machine process
     if reboot then
-        vm.interrupt ("reboot")
+        vm.interrupt("reboot")
     else
-        vm.interrupt ("shutdown")
+        vm.interrupt("shutdown")
     end
 end
 
-function vm.computer.api.setBootAddress (bootAddress)
-    checkArg (1, bootAddress, "string")
+function vm.computer.api.setBootAddress(bootAddress)
+    checkArg(1, bootAddress, "string")
 
-    local eeprom, reason = vm.component.getInstance (vm.component.api.list ("eeprom")(), true)
+    local eeprom, reason = vm.component.getInstance(vm.component.api.list("eeprom")(), true)
     if not eeprom then
         return nil, reason
     end
 
-    eeprom:setData (bootAddress)
+    eeprom:setData(bootAddress)
 end
 
-function vm.computer.api.getBootAddress ()
-    local eeprom, reason = vm.component.getInstance (vm.component.api.list ("eeprom")(), true)
+function vm.computer.api.getBootAddress()
+    local eeprom, reason = vm.component.getInstance(vm.component.api.list("eeprom")(), true)
     if not eeprom then
         return nil, reason
     end
 
-    return eeprom:getData ()
+    return eeprom:getData()
 end
 
-function vm.computer.api.tmpAddress ()
+function vm.computer.api.tmpAddress()
     return vm.computer.tmpFilesystemAddress
 end
 
-function vm.computer.api.log (...)
+function vm.computer.api.log(...)
     local str = ""
-    for _, value in pairs ({...}) do
-        str = str .. string.format ("%-30s ", value)
+    for _, value in pairs({...}) do
+        str = str .. string.format("%-30s ", value)
     end
 
-    vm.log ("computer API %-s", str)
+    vm.log("computer API %-s", str)
     return str
 end
 
@@ -513,29 +513,29 @@ end
 
 -- Destructor can be used to free any data that component allocates.
 -- vram-buffers of virtual gpu for example
-local function virtualComponentRelease (virtualComponent)
+local function virtualComponentRelease(virtualComponent)
     if virtualComponent.destructed then
         return false
     end
 
-    vm.component.deleteVirtualComponent (virtualComponent)
+    vm.component.deleteVirtualComponent(virtualComponent)
     virtualComponent.destructed = true
     return true
 end
 
--- Returns component proxy, which allows to call methods with '.' instead of ':', like gpu.fill (1, 1, 10, 10, ' ')
-local function virtualComponentProxy (virtualComponent)
-    return setmetatable ({}, {
-        __index = function (_, key)
+-- Returns component proxy, which allows to call methods with '.' instead of ':', like gpu.fill(1, 1, 10, 10, ' ')
+local function virtualComponentProxy(virtualComponent)
+    return setmetatable({}, {
+        __index = function(_, key)
             local value = virtualComponent[key]
 
-            if type (value) == "function" then
-                local wrapper = function (...)
+            if type(value) == "function" then
+                local wrapper = function(...)
                     if vm.logging then
-                        vm.log ("Proxy call", virtualComponent.address, virtualComponent.name, key, ...)
+                        vm.log("Proxy call", virtualComponent.address, virtualComponent.name, key, ...)
                     end
 
-                    return value (virtualComponent, ...)
+                    return value(virtualComponent, ...)
                 end
 
                 return wrapper
@@ -546,30 +546,30 @@ local function virtualComponentProxy (virtualComponent)
     })
 end
 
--- Information returned by this function will be returned by vm.computer.api.getDeviceInfo ()
-local function virtualComponentGetDeviceInfo (virtualComponent)
+-- Information returned by this function will be returned by vm.computer.api.getDeviceInfo()
+local function virtualComponentGetDeviceInfo(virtualComponent)
     return {
         vendor = vm.vendor,
         class = "basic",
-        desctiption = "Basic (abstract) virtual component",
+        desctiption = "Basic(abstract) virtual component",
         product = "libvm Virtual Component"
     }
 end
 
-local function virtualComponentHandleEvent (virtualComponent, event)
+local function virtualComponentHandleEvent(virtualComponent, event)
     return false
 end
 
 -- Update function will be called before each call of computer.pullSignal
-local function virtualComponentUpdate (virtualComponent)
+local function virtualComponentUpdate(virtualComponent)
 end
 
-function vm.component.newVirtualComponent (componentName)
+function vm.component.newVirtualComponent(componentName)
     local virtualComponent = {
         destructed = false, -- Used to avoid destructing an already destructed object
-        listable = true, -- If this value set to false, component address will not be listed in component.list ()
+        listable = true, -- If this value set to false, component address will not be listed in component.list()
         name = componentName,
-        address = vm.component.generateComponentID (componentName),
+        address = vm.component.generateComponentID(componentName),
 
         release = virtualComponentRelease,
         proxy = virtualComponentProxy,
@@ -578,18 +578,18 @@ function vm.component.newVirtualComponent (componentName)
         getDeviceInfo = virtualComponentGetDeviceInfo
     }
 
-    return vm.component.registerVirtualComponent (virtualComponent)
+    return vm.component.registerVirtualComponent(virtualComponent)
 end
 
 ------------------------------------------- GPU
 
-local function virtualGpuRelease (virtualGpu)
+local function virtualGpuRelease(virtualGpu)
     if virtualGpu.destructed then
         return false
     end
 
-    for _, index in pairs (virtualGpu.vramBuffers) do
-        gpu.freeBuffer (index)
+    for _, index in pairs(virtualGpu.vramBuffers) do
+        gpu.freeBuffer(index)
     end
 
     if virtualGpu.boundScreen then
@@ -600,10 +600,10 @@ local function virtualGpuRelease (virtualGpu)
         virtualGpu.boundScreen = nil
     end
 
-    return virtualComponentRelease (virtualGpu)
+    return virtualComponentRelease(virtualGpu)
 end
 
-local function virtualGpuGetDeviceInfo (virtualGpu)
+local function virtualGpuGetDeviceInfo(virtualGpu)
     return {
         vendor = vm.vendor,
         class = "display",
@@ -613,120 +613,120 @@ local function virtualGpuGetDeviceInfo (virtualGpu)
 end
 
 -- Used to execute gpu methods in local screen buffer
-local function virtualGpuExecute (virtualGpu, method, ...)
-    checkArg (1, method, "string")
+local function virtualGpuExecute(virtualGpu, method, ...)
+    checkArg(1, method, "string")
 
     local func = gpu[method]
-    assert (func, "trying to execute unexisting gpu method - " .. method)
+    assert(func, "trying to execute unexisting gpu method - " .. method)
 
-    local oldBuffer = gpu.getActiveBuffer ()
-    gpu.setActiveBuffer (virtualGpu.vramBuffers[virtualGpu.activeBuffer])
+    local oldBuffer = gpu.getActiveBuffer()
+    gpu.setActiveBuffer(virtualGpu.vramBuffers[virtualGpu.activeBuffer])
     
-    local result = {xpcall (func, debug.traceback, ...)}
-    gpu.setActiveBuffer (oldBuffer)
+    local result = {xpcall(func, debug.traceback, ...)}
+    gpu.setActiveBuffer(oldBuffer)
 
     if not result[1] then
-        error (result[2])
+        error(result[2])
     end
 
     if virtualGpu.boundScreen and virtualGpu.boundScreen.autoDisplay then
-        virtualGpu.boundScreen:display ()
+        virtualGpu.boundScreen:display()
     end
 
-    return table.unpack (result, 2)
+    return table.unpack(result, 2)
 end
 
-local function virtualGpuMaxResolution (virtualGpu)
+local function virtualGpuMaxResolution(virtualGpu)
     return virtualGpu.maxResolutionX, virtualGpu.maxResolutionY
 end
 
-local function virtualGpuSetResolution (virtualGpu, resolutionX, resolutionY)
-    checkArg (1, resolutionX, "number")
-    checkArg (2, resolutionY, "number")
+local function virtualGpuSetResolution(virtualGpu, resolutionX, resolutionY)
+    checkArg(1, resolutionX, "number")
+    checkArg(2, resolutionY, "number")
 
     if resolutionX < 1 or resolutionX > virtualGpu.maxResolutionX or resolutionY < 1 or resolutionY > virtualGpu.maxResolutionY then
-        error ("unsupported resolution")
+        error("unsupported resolution")
     end
 
-    local virtualGpuResX, virtualGpuResY = virtualGpu:getResolution ()
+    local virtualGpuResX, virtualGpuResY = virtualGpu:getResolution()
     if resolutionX == virtualGpuResX and resolutionY == virtualGpuResY then
         return false
     end
 
-    return virtualGpu:execute ("setResolution", resolutionX, resolutionY)
+    return virtualGpu:execute("setResolution", resolutionX, resolutionY)
 end
 
-local function virtualGpuGetResolution (virtualGpu)
+local function virtualGpuGetResolution(virtualGpu)
     -- Resolution is linked to vram buffer
-    return virtualGpu:execute ("getResolution")
+    return virtualGpu:execute("getResolution")
 end
 
-local function virtualGpuSet (virtualGpu, x, y, text, vertical)
-    checkArg (1, x,        "number"        )
-    checkArg (2, y,        "number"        )
-    checkArg (3, text,     "string"        )
-    checkArg (4, vertical, "boolean", "nil")
+local function virtualGpuSet(virtualGpu, x, y, text, vertical)
+    checkArg(1, x,        "number"        )
+    checkArg(2, y,        "number"        )
+    checkArg(3, text,     "string"        )
+    checkArg(4, vertical, "boolean", "nil")
 
-    return virtualGpu:execute ("set", x, y, text, vertical)
+    return virtualGpu:execute("set", x, y, text, vertical)
 end
 
-local function virtualGpuGet (virtualGpu, x, y)
-    checkArg (1, x, "number")
-    checkArg (2, y, "number")
+local function virtualGpuGet(virtualGpu, x, y)
+    checkArg(1, x, "number")
+    checkArg(2, y, "number")
 
-    return virtualGpu:execute ("get", x, y)
+    return virtualGpu:execute("get", x, y)
 end
 
-local function virtualGpuFill (virtualGpu, x, y, width, height, character)
-    checkArg (1, x,         "number")
-    checkArg (2, y,         "number")
-    checkArg (3, width,     "number")
-    checkArg (4, height,    "number")
-    checkArg (5, character, "string")
+local function virtualGpuFill(virtualGpu, x, y, width, height, character)
+    checkArg(1, x,         "number")
+    checkArg(2, y,         "number")
+    checkArg(3, width,     "number")
+    checkArg(4, height,    "number")
+    checkArg(5, character, "string")
 
-    return virtualGpu:execute ("fill", x, y, width, height, character)
+    return virtualGpu:execute("fill", x, y, width, height, character)
 end
 
-local function virtualGpuCopy (virtualGpu, x, y, width, height, tx, ty)
-    checkArg (1, x,      "number")
-    checkArg (2, y,      "number")
-    checkArg (3, width,  "number")
-    checkArg (4, height, "number")
-    checkArg (5, tx,     "number")
-    checkArg (6, ty,     "number")
+local function virtualGpuCopy(virtualGpu, x, y, width, height, tx, ty)
+    checkArg(1, x,      "number")
+    checkArg(2, y,      "number")
+    checkArg(3, width,  "number")
+    checkArg(4, height, "number")
+    checkArg(5, tx,     "number")
+    checkArg(6, ty,     "number")
 
-    return virtualGpu:execute ("copy", x, y, width, height, tx, ty)
+    return virtualGpu:execute("copy", x, y, width, height, tx, ty)
 end
 
-local function virtualGpuSetBackground (virtualGpu, value, palette)
-    checkArg (1, value,   "number"        )
-    checkArg (2, palette, "boolean", "nil")
+local function virtualGpuSetBackground(virtualGpu, value, palette)
+    checkArg(1, value,   "number"        )
+    checkArg(2, palette, "boolean", "nil")
 
     -- Эмпирическим путём выяснилось, что background и foreground привязаны к vram-буферу,
     -- поэтому подобные параметры можно не кешировать, полностью полагаясь на видеопамять
-    return virtualGpu:execute ("setBackground", value, palette)
+    return virtualGpu:execute("setBackground", value, palette)
 end
 
-local function virtualGpuGetBackground (virtualGpu)
-    return virtualGpu:execute ("getBackground")
+local function virtualGpuGetBackground(virtualGpu)
+    return virtualGpu:execute("getBackground")
 end
 
-local function virtualGpuSetForeground (virtualGpu, value, palette)
-    checkArg (1, value,   "number"        )
-    checkArg (2, palette, "boolean", "nil")
+local function virtualGpuSetForeground(virtualGpu, value, palette)
+    checkArg(1, value,   "number"        )
+    checkArg(2, palette, "boolean", "nil")
 
-    return virtualGpu:execute ("setForeground", value, palette)
+    return virtualGpu:execute("setForeground", value, palette)
 end
 
-local function virtualGpuGetForeground (virtualGpu)
-    return virtualGpu:execute ("getForeground")
+local function virtualGpuGetForeground(virtualGpu)
+    return virtualGpu:execute("getForeground")
 end
 
-local function virtualGpuBind (virtualGpu, address, reset)
-    checkArg (1, address, "string"        )
-    checkArg (2, reset,   "boolean", "nil")
+local function virtualGpuBind(virtualGpu, address, reset)
+    checkArg(1, address, "string"        )
+    checkArg(2, reset,   "boolean", "nil")
 
-    local screenInstance, reason = vm.component.getInstance (address, true)
+    local screenInstance, reason = vm.component.getInstance(address, true)
     if not screenInstance then
         return nil, reason
     end
@@ -737,41 +737,41 @@ local function virtualGpuBind (virtualGpu, address, reset)
     return true
 end
 
-local function virtualGpuGetScreen (virtualGpu)
+local function virtualGpuGetScreen(virtualGpu)
     if virtualGpu.boundScreen then
         return virtualGpu.boundScreen.address
     end
 end
 
-local function virtualGpuMaxDepth (virtualGpu)
-    return virtualGpu:execute ("maxDepth")
+local function virtualGpuMaxDepth(virtualGpu)
+    return virtualGpu:execute("maxDepth")
 end
 
-local function virtualGpuGetDepth (virtualGpu)
-    return virtualGpu:execute ("getDepth")
+local function virtualGpuGetDepth(virtualGpu)
+    return virtualGpu:execute("getDepth")
 end
 
-local function virtualGpuSetDepth (virtualGpu, depth)
-    checkArg (1, depth, "number")
-    return virtualGpu:execute ("setDepth", depth)
+local function virtualGpuSetDepth(virtualGpu, depth)
+    checkArg(1, depth, "number")
+    return virtualGpu:execute("setDepth", depth)
 end
 
-local function virtualGpuGetViewport (virtualGpu)
-    return virtualGpu:getResolution ()
+local function virtualGpuGetViewport(virtualGpu)
+    return virtualGpu:getResolution()
 end
 
-local function virtualGpuSetViewport (virtualGpu, width, height)
-    checkArg (1, width,  "number")
-    checkArg (1, height, "number")
-    return virtualGpu:setResolution (width, height)
+local function virtualGpuSetViewport(virtualGpu, width, height)
+    checkArg(1, width,  "number")
+    checkArg(1, height, "number")
+    return virtualGpu:setResolution(width, height)
 end
 
-local function virtualGpuGetActiveBuffer (virtualGpu)
+local function virtualGpuGetActiveBuffer(virtualGpu)
     return virtualGpu.activeBuffer
 end
 
-local function virtualGpuSetActiveBuffer (virtualGpu, index)
-    checkArg (1, index, "number")
+local function virtualGpuSetActiveBuffer(virtualGpu, index)
+    checkArg(1, index, "number")
     if not virtualGpu.vramBuffers[index] then
         return nil, "invalid buffer index"
     end
@@ -781,11 +781,11 @@ local function virtualGpuSetActiveBuffer (virtualGpu, index)
     return oldActiveBuffer
 end
 
-local function virtualGpuBuffers (virtualGpu)
+local function virtualGpuBuffers(virtualGpu)
     local buffers = {}
-    for index in pairs (virtualGpu.vramBuffers) do
+    for index in pairs(virtualGpu.vramBuffers) do
         if index ~= 0 then
-            table.insert (buffers, index)
+            table.insert(buffers, index)
         end
     end
 
@@ -793,12 +793,12 @@ local function virtualGpuBuffers (virtualGpu)
     return buffers
 end
 
-local function virtualGpuAllocateBuffer (virtualGpu, width, height)
-    checkArg (1, width,  "number", "nil")
-    checkArg (2, height, "number", "nil")
+local function virtualGpuAllocateBuffer(virtualGpu, width, height)
+    checkArg(1, width,  "number", "nil")
+    checkArg(2, height, "number", "nil")
 
-    local resX, resY = virtualGpu:getResolution ()
-    local index, reason = gpu.allocateBuffer (width or resX, height or resY)
+    local resX, resY = virtualGpu:getResolution()
+    local index, reason = gpu.allocateBuffer(width or resX, height or resY)
     if not index then
         return nil, reason
     end
@@ -807,8 +807,8 @@ local function virtualGpuAllocateBuffer (virtualGpu, width, height)
     return #virtualGpu.vramBuffers
 end
 
-local function virtualGpuFreeBuffer (virtualGpu, index)
-    checkArg (1, index, "number", "nil")
+local function virtualGpuFreeBuffer(virtualGpu, index)
+    checkArg(1, index, "number", "nil")
     if index == 0 or not virtualGpu.vramBuffers[index] then
         return nil, "invalid buffer index"
     end
@@ -817,64 +817,64 @@ local function virtualGpuFreeBuffer (virtualGpu, index)
         virtualGpu.activeBuffer = 0
     end
 
-    return virtualGpu:execute ("freeBuffer", virtualGpu.vramBuffers[index])
+    return virtualGpu:execute("freeBuffer", virtualGpu.vramBuffers[index])
 end
 
-local function virtualGpuFreeAllBuffers (virtualGpu)
+local function virtualGpuFreeAllBuffers(virtualGpu)
     local n = #virtualGpu.vramBuffers
     for index = 1, n do
-        assert (virtualGpu:execute ("freeBuffer", index))
+        assert(virtualGpu:execute("freeBuffer", index))
     end
 
     return n
 end
 
-local function virtualGpuTotalMemory (virtualGpu)
-    return virtualGpu:execute ("totalMemory")
+local function virtualGpuTotalMemory(virtualGpu)
+    return virtualGpu:execute("totalMemory")
 end
 
-local function virtualGpuFreeMemory (virtualGpu)
-    return virtualGpu:execute ("freeMemory")
+local function virtualGpuFreeMemory(virtualGpu)
+    return virtualGpu:execute("freeMemory")
 end
 
-local function virtualGpuGetBufferSize (virtualGpu, index)
-    checkArg (1, index, "number", "nil")
+local function virtualGpuGetBufferSize(virtualGpu, index)
+    checkArg(1, index, "number", "nil")
     if not virtualGpu.vramBuffers[index] then
         return nil, "invalid buffer index"
     end
 
-    return gpu.getBufferSize (virtualGpu.vramBuffers[index])
+    return gpu.getBufferSize(virtualGpu.vramBuffers[index])
 end
 
-local function virtualGpuBitblt (virtualGpu, dst, row, col, width, height, src, fromCol, fromRow)
+local function virtualGpuBitblt(virtualGpu, dst, row, col, width, height, src, fromCol, fromRow)
            -- Arg number, name,    required type,                         default value
-    checkArg (1,          dst,     "number", "nil"); dst     = dst     or 0; local dstBufferSizeX, dstBufferSizeY = virtualGpu:getBufferSize (dst)
-    checkArg (2,          row,     "number", "nil"); row     = row     or 1
-    checkArg (3,          col,     "number", "nil"); col     = col     or 1
-    checkArg (4,          width,   "number", "nil"); width   = width   or dstBufferSizeX
-    checkArg (5,          height,  "number", "nil"); height  = height  or dstBufferSizeY
-    checkArg (6,          src,     "number", "nil"); src     = src     or virtualGpu.activeBuffer
-    checkArg (7,          fromCol, "number", "nil"); fromCol = fromCol or 1
-    checkArg (8,          fromRow, "number", "nil"); fromRow = fromRow or 1
+    checkArg(1,          dst,     "number", "nil"); dst     = dst     or 0; local dstBufferSizeX, dstBufferSizeY = virtualGpu:getBufferSize(dst)
+    checkArg(2,          row,     "number", "nil"); row     = row     or 1
+    checkArg(3,          col,     "number", "nil"); col     = col     or 1
+    checkArg(4,          width,   "number", "nil"); width   = width   or dstBufferSizeX
+    checkArg(5,          height,  "number", "nil"); height  = height  or dstBufferSizeY
+    checkArg(6,          src,     "number", "nil"); src     = src     or virtualGpu.activeBuffer
+    checkArg(7,          fromCol, "number", "nil"); fromCol = fromCol or 1
+    checkArg(8,          fromRow, "number", "nil"); fromRow = fromRow or 1
 
     if not virtualGpu.vramBuffers[dst] or not virtualGpu.vramBuffers[src] then
         return nil, "invalid buffer index"
     end
 
-    local res = {virtualGpu:execute ("bitblt", virtualGpu.vramBuffers[dst], row, col, width, height, virtualGpu.vramBuffers[src], fromCol, fromRow)}
+    local res = {virtualGpu:execute("bitblt", virtualGpu.vramBuffers[dst], row, col, width, height, virtualGpu.vramBuffers[src], fromCol, fromRow)}
     if dst == 0 and virtualGpu.boundScreen then
-        virtualGpu.boundScreen:display ()
+        virtualGpu.boundScreen:display()
     end
 
-    return table.unpack (res)
+    return table.unpack(res)
 end
 
-function vm.component.newVirtualGpu (maxResolutionX, maxResolutionY)
-    checkArg (1, maxResolutionX, "number", "nil")
-    checkArg (2, maxResolutionY, "number", "nil")
+function vm.component.newVirtualGpu(maxResolutionX, maxResolutionY)
+    checkArg(1, maxResolutionX, "number", "nil")
+    checkArg(2, maxResolutionY, "number", "nil")
 
-    local actualMaxResolutionX, actualMaxResolutionY = gpu.getResolution ()
-    local virtualGpu = vm.component.newVirtualComponent ("gpu")
+    local actualMaxResolutionX, actualMaxResolutionY = gpu.getResolution()
+    local virtualGpu = vm.component.newVirtualComponent("gpu")
 
     virtualGpu.maxResolutionX = maxResolutionX or actualMaxResolutionX
     virtualGpu.maxResolutionY = maxResolutionY or actualMaxResolutionY
@@ -917,10 +917,10 @@ function vm.component.newVirtualGpu (maxResolutionX, maxResolutionY)
     -- УХ БЛЯ
 
     -- 0 is always reserved for screen buffer
-    virtualGpu.vramBuffers[0], reason = gpu.allocateBuffer (virtualGpu.maxResolutionX, virtualGpu.maxResolutionY)
+    virtualGpu.vramBuffers[0], reason = gpu.allocateBuffer(virtualGpu.maxResolutionX, virtualGpu.maxResolutionY)
     if not virtualGpu.vramBuffers[0] then
-        virtualGpu:release ()
-        error ("failed to allocate virtual gpu screen buffer; " .. reason)
+        virtualGpu:release()
+        error("failed to allocate virtual gpu screen buffer; " .. reason)
     end
 
     return virtualGpu
@@ -928,7 +928,7 @@ end
 
 ------------------------------------------- Screen
 
-local function virtualScreenRelease (virtualScreen)
+local function virtualScreenRelease(virtualScreen)
     if virtualScreen.desrtucted then
         return false
     end
@@ -941,18 +941,18 @@ local function virtualScreenRelease (virtualScreen)
         virtualScreen.boundGpu = nil
     end
 
-    return virtualComponentRelease (virtualScreen)
+    return virtualComponentRelease(virtualScreen)
 end
 
-local function virtualScreenHandleEvent (virtualScreen, event)
-    local eventType, address, x, y, button, nickname = table.unpack (event)
+local function virtualScreenHandleEvent(virtualScreen, event)
+    local eventType, address, x, y, button, nickname = table.unpack(event)
 
     if eventType == "touch" or eventType == "drag" or eventType == "drop" or eventType == "scroll" then
-        local sizeX, sizeY = virtualScreen:getVisualSize ()
+        local sizeX, sizeY = virtualScreen:getVisualSize()
         local screenX, screenY = x-virtualScreen.visualPositionX, y-virtualScreen.visualPositionY
         
         if screenX >= 1 and screenX < sizeX+1 and screenY >= 1 and screenY < sizeY+1 then
-            vm.computer.api.pushSignal (eventType, virtualScreen.address, screenX, screenY, button, nickname)
+            vm.computer.api.pushSignal(eventType, virtualScreen.address, screenX, screenY, button, nickname)
             return true
         end
 
@@ -960,13 +960,13 @@ local function virtualScreenHandleEvent (virtualScreen, event)
     end
 end
 
-local function virtualScreenUpdate (virtualScreen)
+local function virtualScreenUpdate(virtualScreen)
     if not virtualScreen.autoDisplay then
-        virtualScreen:display ()
+        virtualScreen:display()
     end
 end
 
-local function virtualScreenGetDeviceInfo (virtualScreen)
+local function virtualScreenGetDeviceInfo(virtualScreen)
     return {
         vendor = vm.vendor,
         class = "display",
@@ -976,52 +976,52 @@ local function virtualScreenGetDeviceInfo (virtualScreen)
 end
 
 -- Displays virtual screen like window
-local function virtualScreenDisplay (virtualScreen)
-    local sizeX, sizeY = virtualScreen:getVisualSize ()
+local function virtualScreenDisplay(virtualScreen)
+    local sizeX, sizeY = virtualScreen:getVisualSize()
     local x, y = virtualScreen.visualPositionX, virtualScreen.visualPositionY
 
-    gpu.setBackground (0x000000)
-    gpu.setForeground (virtualScreen.visualBorderColor)
-    drawSemipixelBorder (x, y, sizeX, sizeY)
+    gpu.setBackground(0x000000)
+    gpu.setForeground(virtualScreen.visualBorderColor)
+    drawSemipixelBorder(x, y, sizeX, sizeY)
 
     local lines = {}
-    if not virtualScreen.power    then table.insert (lines, "Screen is turned off") end
-    if not virtualScreen.boundGpu then table.insert (lines, "GPU Not bound"       ) end
+    if not virtualScreen.power    then table.insert(lines, "Screen is turned off") end
+    if not virtualScreen.boundGpu then table.insert(lines, "GPU Not bound"       ) end
 
     if #lines > 0 then
-        gpu.setBackground (0x000000)
-        gpu.setForeground (virtualScreen.visualTextColor)
-        gpu.fill (x+1, y+1, sizeX, sizeY, ' ')
+        gpu.setBackground(0x000000)
+        gpu.setForeground(virtualScreen.visualTextColor)
+        gpu.fill(x+1, y+1, sizeX, sizeY, ' ')
         
-        for index, text in pairs (lines) do
-            gpu.set (x+1+sizeX/2-#text/2, y+sizeY/2-#lines/2+index, text)
+        for index, text in pairs(lines) do
+            gpu.set(x+1+sizeX/2-#text/2, y+sizeY/2-#lines/2+index, text)
         end
     elseif virtualScreen.boundGpu then
-        gpu.bitblt (0, x+1, y+1, sizeX, sizeY, virtualScreen.boundGpu.vramBuffers[0])
+        gpu.bitblt(0, x+1, y+1, sizeX, sizeY, virtualScreen.boundGpu.vramBuffers[0])
     end
 end
 
 -- If any gpu is bound to the screen, the function returns it's resolution.
 -- Otherwise returns half of real used gpu resolution as default value
-local function virtualScreenGetVisualSize (virtualScreen)
+local function virtualScreenGetVisualSize(virtualScreen)
     if virtualScreen.boundGpu then
-        return virtualScreen.boundGpu:getBufferSize (0)
+        return virtualScreen.boundGpu:getBufferSize(0)
     end
 
-    local realResolutionX, realResolutionY = gpu.getResolution ()
-    return math.floor (realResolutionX/2), math.floor (realResolutionY/2)
+    local realResolutionX, realResolutionY = gpu.getResolution()
+    return math.floor(realResolutionX/2), math.floor(realResolutionY/2)
 end
 
-local function virtualScreenSetPrecise (virtualScreen, enabled)
-    checkArg (1, enabled, "boolean")
+local function virtualScreenSetPrecise(virtualScreen, enabled)
+    checkArg(1, enabled, "boolean")
     return false -- Unfortunately, there is no way to emulate precise touch events
 end
 
-local function virtualScreenIsPrecise (virtualScreen)
+local function virtualScreenIsPrecise(virtualScreen)
     return false
 end
 
-local function virtualScreenTurnOff (virtualScreen)
+local function virtualScreenTurnOff(virtualScreen)
     if virtualScreen.power then
         virtualScreen.power = false
         return true
@@ -1030,7 +1030,7 @@ local function virtualScreenTurnOff (virtualScreen)
     return false
 end
 
-local function virtualScreenTurnOn (virtualScreen)
+local function virtualScreenTurnOn(virtualScreen)
     if not virtualScreen.power then
         virtualScreen.power = true
         return true
@@ -1039,35 +1039,35 @@ local function virtualScreenTurnOn (virtualScreen)
     return false
 end
 
-local function virtualScreenIsOn (virtualScreen)
+local function virtualScreenIsOn(virtualScreen)
     return virtualScreen.power
 end
 
-local function virtualScreenSetTouchModeInverted (value)
-    checkArg (1, value, "boolean")
+local function virtualScreenSetTouchModeInverted(value)
+    checkArg(1, value, "boolean")
     return true
 end
 
-local function virtualScreenIsTouchModeInverted (virtualScreen)
+local function virtualScreenIsTouchModeInverted(virtualScreen)
     return false
 end
 
-local function virtualScreenGetAspectRatio (virtualScreen)
+local function virtualScreenGetAspectRatio(virtualScreen)
     return 1, 1
 end
 
-local function virtualScreenGetKeyboards (virtualScreen)
+local function virtualScreenGetKeyboards(virtualScreen)
     local keyboards = {}
-    for address, instance in pairs (vm.component.list) do
-        table.insert (keyboards, address)
+    for address, instance in pairs(vm.component.list) do
+        table.insert(keyboards, address)
     end
 
     keyboards.n = #keyboards
     return keyboards
 end 
         
-function vm.component.newVirtualScreen (x, y)
-    local virtualScreen = vm.component.newVirtualComponent ("screen")
+function vm.component.newVirtualScreen(x, y)
+    local virtualScreen = vm.component.newVirtualComponent("screen")
 
     virtualScreen.boundGpu = nil -- Sets only with gpu.bind function
     virtualScreen.power = true -- Emulate screen power. When power is off, screen only shows 'Screen turned off'
@@ -1101,19 +1101,19 @@ end
 
 ------------------------------------------- Filesystem
 
-local function virtualFilesystemRelease (virtualFilesystem)
+local function virtualFilesystemRelease(virtualFilesystem)
     if virtualFilesystem.destructed then
         return false
     end
 
-    for handle in pairs (virtualFilesystem.openedFiles) do
-        virtualFilesystem:close (handle)
+    for handle in pairs(virtualFilesystem.openedFiles) do
+        virtualFilesystem:close(handle)
     end
 
-    return virtualComponentRelease (virtualFilesystem)
+    return virtualComponentRelease(virtualFilesystem)
 end
 
-local function virtualFilesystemGetDeviceInfo (virtualFilesystem)
+local function virtualFilesystemGetDeviceInfo(virtualFilesystem)
     return {
         vendor = vm.vendor,
         class = "volume",
@@ -1122,8 +1122,8 @@ local function virtualFilesystemGetDeviceInfo (virtualFilesystem)
     }
 end
 
-local function virtualFilesystemCheckHandle (virtualFilesystem, handle)
-    checkArg (1, handle, "table")
+local function virtualFilesystemCheckHandle(virtualFilesystem, handle)
+    checkArg(1, handle, "table")
     if virtualFilesystem.openedFiles[handle] ~= nil then
         return true
     end
@@ -1131,20 +1131,20 @@ local function virtualFilesystemCheckHandle (virtualFilesystem, handle)
     return false, "bad file descriptor"
 end
 
-local function virtualFilesystemResolve (virtualFilesystem, path)
-    checkArg (1, path, "string")
+local function virtualFilesystemResolve(virtualFilesystem, path)
+    checkArg(1, path, "string")
     return virtualFilesystem.localRoot .. '/' .. path
 end
 
-local function virtualFilesystemSpaceUsed (virtualFilesystem)
-    return fs.spaceUsed ()
+local function virtualFilesystemSpaceUsed(virtualFilesystem)
+    return fs.spaceUsed()
 end
 
-local function virtualFilesystemOpen (virtualFilesystem, path, mode)
-    checkArg (1, path, "string"       )
-    checkArg (2, mode, "string", "nil")
+local function virtualFilesystemOpen(virtualFilesystem, path, mode)
+    checkArg(1, path, "string"       )
+    checkArg(2, mode, "string", "nil")
     
-    local handle, reason = fs.open (virtualFilesystem:resolve (path), mode)
+    local handle, reason = fs.open(virtualFilesystem:resolve(path), mode)
     if not handle then
         return nil, reason
     end
@@ -1153,125 +1153,125 @@ local function virtualFilesystemOpen (virtualFilesystem, path, mode)
     return handle
 end
 
-local function virtualFilesystemClose (virtualFilesystem, handle)
-    checkArg (1, handle, "table")
+local function virtualFilesystemClose(virtualFilesystem, handle)
+    checkArg(1, handle, "table")
 
-    local valid, reason = virtualFilesystem:checkHandle (handle)
+    local valid, reason = virtualFilesystem:checkHandle(handle)
     if not valid then
         return nil, reason
     end
 
-    result = {fs.close (handle)}
+    result = {fs.close(handle)}
     virtualFilesystem.openedFiles[handle] = nil
-    return table.unpack (result)
+    return table.unpack(result)
 end
 
-local function virtualFilesystemSeek (virtualFilesystem, handle, whence, offset)
-    checkArg (1, handle, "table")
-    checkArg (2, whence, "string")
-    checkArg (3, offset, "number")
+local function virtualFilesystemSeek(virtualFilesystem, handle, whence, offset)
+    checkArg(1, handle, "table")
+    checkArg(2, whence, "string")
+    checkArg(3, offset, "number")
 
-    local valid, reason = virtualFilesystem:checkHandle (handle)
+    local valid, reason = virtualFilesystem:checkHandle(handle)
     if not valid then
         return nil, reason
     end
 
-    return fs.seek (handle, whence, offset)
+    return fs.seek(handle, whence, offset)
 end
 
-local function virtualFilesystemMakeDirectory (virtualFilesystem, path)
-    checkArg (1, path, "string")
-    return fs.makeDirectory (virtualFilesystem:resolve (path))
+local function virtualFilesystemMakeDirectory(virtualFilesystem, path)
+    checkArg(1, path, "string")
+    return fs.makeDirectory(virtualFilesystem:resolve(path))
 end
 
-local function virtualFilesystemExists (virtualFilesystem, path)
-    checkArg (1, path, "string")
-    return fs.exists (virtualFilesystem:resolve (path))
+local function virtualFilesystemExists(virtualFilesystem, path)
+    checkArg(1, path, "string")
+    return fs.exists(virtualFilesystem:resolve(path))
 end
 
-local function virtualFilesystemIsReadOnly (virtualFilesystem)
-    return fs.isReadOnly ()
+local function virtualFilesystemIsReadOnly(virtualFilesystem)
+    return fs.isReadOnly()
 end
 
-local function virtualFilesystemWrite (virtualFilesystem, handle, value)
-    checkArg (1, handle, "table")
-    checkArg (2, value,  "string")
+local function virtualFilesystemWrite(virtualFilesystem, handle, value)
+    checkArg(1, handle, "table")
+    checkArg(2, value,  "string")
 
-    local valid, reason = virtualFilesystem:checkHandle (handle)
+    local valid, reason = virtualFilesystem:checkHandle(handle)
     if not valid then
         return nil, reason
     end
 
-    return fs.write (handle, value)
+    return fs.write(handle, value)
 end
 
-local function virtualFilesystemSpaceTotal (virtualFilesystem)
-    return fs.spaceTotal ()
+local function virtualFilesystemSpaceTotal(virtualFilesystem)
+    return fs.spaceTotal()
 end
 
-local function virtualFilesystemIsDirectory (virtualFilesystem, path)
-    checkArg (1, path, "string")
-    return fs.isDirectory (virtualFilesystem:resolve (path))
+local function virtualFilesystemIsDirectory(virtualFilesystem, path)
+    checkArg(1, path, "string")
+    return fs.isDirectory(virtualFilesystem:resolve(path))
 end
 
-local function virtualFilesystemRename (virtualFilesystem, from, to)
-    checkArg (1, from, "string")
-    checkArg (1, to,   "string")
-    return fs.rename (virtualFilesystem:resolve (from), virtualFilesystem:resolve (to))
+local function virtualFilesystemRename(virtualFilesystem, from, to)
+    checkArg(1, from, "string")
+    checkArg(1, to,   "string")
+    return fs.rename(virtualFilesystem:resolve(from), virtualFilesystem:resolve(to))
 end
 
-local function virtualFilesystemList (virtualFilesystem, path)
-    checkArg (1, path, "string")
-    return fs.list (virtualFilesystem:resolve (path))
+local function virtualFilesystemList(virtualFilesystem, path)
+    checkArg(1, path, "string")
+    return fs.list(virtualFilesystem:resolve(path))
 end
 
-local function virtualFilesystemLastModified (virtualFilesystem, path)
-    checkArg (1, path, "string")
-    return fs.lastModified (virtualFilesystem:resolve (path))
+local function virtualFilesystemLastModified(virtualFilesystem, path)
+    checkArg(1, path, "string")
+    return fs.lastModified(virtualFilesystem:resolve(path))
 end
 
-local function virtualFilesystemGetLabel (virtualFilesystem)
+local function virtualFilesystemGetLabel(virtualFilesystem)
     return virtualFilesystem.label
 end
 
-local function virtualFilesystemRemove (virtualFilesystem, path)
-    checkArg (1, path, "string")
-    return fs.remove (virtualFilesystem:resolve (path))
+local function virtualFilesystemRemove(virtualFilesystem, path)
+    checkArg(1, path, "string")
+    return fs.remove(virtualFilesystem:resolve(path))
 end
 
-local function virtualFilesystemSize (virtualFilesystem, path)
-    checkArg (1, path, "string")
-    return fs.size (virtualFilesystem:resolve (path))
+local function virtualFilesystemSize(virtualFilesystem, path)
+    checkArg(1, path, "string")
+    return fs.size(virtualFilesystem:resolve(path))
 end
 
-local function virtualFilesystemRead (virtualFilesystem, handle, count)
-    checkArg (1, handle, "table")
-    checkArg (2, count,  "number")
+local function virtualFilesystemRead(virtualFilesystem, handle, count)
+    checkArg(1, handle, "table")
+    checkArg(2, count,  "number")
 
-    local valid, reason = virtualFilesystem:checkHandle (handle)
+    local valid, reason = virtualFilesystem:checkHandle(handle)
     if not valid then
         return nil, reason
     end
 
-    return fs.read (handle, count)
+    return fs.read(handle, count)
 end
 
-local function virtualFilesystemSetLabel (virtualFilesystem, value)
-    checkArg (1, value, "string")
-    virtualFilesystem.label = value:sub (1, virtualFilesystem.labelSizeLimit) -- Filesystem labels are limited by 16 characters
+local function virtualFilesystemSetLabel(virtualFilesystem, value)
+    checkArg(1, value, "string")
+    virtualFilesystem.label = value:sub(1, virtualFilesystem.labelSizeLimit) -- Filesystem labels are limited by 16 characters
     return virtualFilesystem.value
 end
 
 -- Virtual filesystem limited by local root directory
-function vm.component.newVirtualFilesystem (localRoot, label)
-    checkArg (1, localRoot, "string"       )
-    checkArg (1, label,     "string", "nil")
+function vm.component.newVirtualFilesystem(localRoot, label)
+    checkArg(1, localRoot, "string"       )
+    checkArg(1, label,     "string", "nil")
     
-    if not fs.isDirectory (localRoot) then
-        error ("invalid filesystem root directory")
+    if not fs.isDirectory(localRoot) then
+        error("invalid filesystem root directory")
     end
 
-    local virtualFilesystem = vm.component.newVirtualComponent ("filesystem")
+    local virtualFilesystem = vm.component.newVirtualComponent("filesystem")
 
     virtualFilesystem.labelSizeLimit = 16
     virtualFilesystem.localRoot = localRoot
@@ -1302,7 +1302,7 @@ function vm.component.newVirtualFilesystem (localRoot, label)
     virtualFilesystem.setLabel = virtualFilesystemSetLabel
 
     if label then
-        virtualFilesystem:setLabel (label) 
+        virtualFilesystem:setLabel(label) 
     end
 
     return virtualFilesystem
@@ -1310,7 +1310,7 @@ end
 
 ------------------------------------------- Eeprom
 
-local function virtualEepromGetDeviceInfo (virtualEeprom)
+local function virtualEepromGetDeviceInfo(virtualEeprom)
     return {
         vendor = vm.vendor,
         class = "memory",
@@ -1319,16 +1319,16 @@ local function virtualEepromGetDeviceInfo (virtualEeprom)
     }
 end
  
-local function virtualEepromLoadFromFile (virtualEeprom, path)
-    checkArg (1, path, "string")
-    local handle = fs.open (path)
+local function virtualEepromLoadFromFile(virtualEeprom, path)
+    checkArg(1, path, "string")
+    local handle = fs.open(path)
     if not handle then
         return nil, "Failed to read file"
     end
 
     local data, chunk = ""
     while true do
-        chunk = fs.read (handle, 4096)
+        chunk = fs.read(handle, 4096)
         if chunk then
             data = data .. chunk
         else
@@ -1336,74 +1336,74 @@ local function virtualEepromLoadFromFile (virtualEeprom, path)
         end
     end
 
-    fs.close (handle)
-    virtualEeprom:set (data)
+    fs.close(handle)
+    virtualEeprom:set(data)
 
     return true
 end
 
-local function virtualEepromGet (virtualEeprom)
+local function virtualEepromGet(virtualEeprom)
     return virtualEeprom.code
 end
 
-local function virtualEepromSet (virtualEeprom, data)
-    checkArg (1, data, "string")
+local function virtualEepromSet(virtualEeprom, data)
+    checkArg(1, data, "string")
     if virtualEeprom.readonly then
         return nil, "storage is readonly"
     end
 
     if #data > virtualEeprom.codeSizeLimit then
-        error ("not enough space")
+        error("not enough space")
     end
     virtualEeprom.code = data
 end
 
-local function virtualEepromGetLabel (virtualEeprom)
+local function virtualEepromGetLabel(virtualEeprom)
     return virtualEeprom.label
 end
 
-local function virtualEepromSetLabel (virtualEeprom, label)
-    checkArg (1, label, "string")
-    virtualEeprom.label = label:sub (1, virtualEeprom.labelSizeLimit)
+local function virtualEepromSetLabel(virtualEeprom, label)
+    checkArg(1, label, "string")
+    virtualEeprom.label = label:sub(1, virtualEeprom.labelSizeLimit)
     return virtualEeprom.label
 end
 
-local function virtualEepromGetData (virtualEeprom)
+local function virtualEepromGetData(virtualEeprom)
     return virtualEeprom.data
 end
 
-local function virtualEepromSetData (virtualEeprom, data)
-    checkArg (1, data, "string")
+local function virtualEepromSetData(virtualEeprom, data)
+    checkArg(1, data, "string")
     if #data > virtualEeprom.dataSizeLimit then
-        error ("not enough space")
+        error("not enough space")
     end
     virtualEeprom.data = data
 end
 
-local function virtualEepromGetSize (virtualEeprom)
+local function virtualEepromGetSize(virtualEeprom)
     return virtualEeprom.codeSizeLimit
 end
 
-local function virtualEepromGetDataSize (virtualEeprom)
+local function virtualEepromGetDataSize(virtualEeprom)
     return virtualEeprom.dataSizeLimit
 end
 
-local function virtualEepromGetChecksum (virtualEeprom)
-    return string.format ("%x", crc32.hash (virtualEeprom.code))
+local function virtualEepromGetChecksum(virtualEeprom)
+    return string.format("%x", crc32.hash(virtualEeprom.code))
 end
 
-local function virtualEepromMakeReadonly (virtualEeprom, checksum)
-    checkArg (1, checksum, "string")
-    if checksum ~= virtualEeprom:getChecksum () then
+local function virtualEepromMakeReadonly(virtualEeprom, checksum)
+    checkArg(1, checksum, "string")
+    if checksum ~= virtualEeprom:getChecksum() then
         return nil, "incorrect checksum"
     end
     return true
 end
 
-function vm.component.newVirtualEeprom (label)
-    checkArg (1, label, "string", "nil")
+function vm.component.newVirtualEeprom(label)
+    checkArg(1, label, "string", "nil")
 
-    local virtualEeprom = vm.component.newVirtualComponent ("eeprom")
+    local virtualEeprom = vm.component.newVirtualComponent("eeprom")
 
     virtualEeprom.codeSizeLimit = math.huge
     virtualEeprom.dataSizeLimit = 256
@@ -1426,7 +1426,7 @@ function vm.component.newVirtualEeprom (label)
     virtualEeprom.setLabel = virtualEepromSetLabel
 
     if label then
-        virtualEeprom:setLabel (label)
+        virtualEeprom:setLabel(label)
     end
 
     return virtualEeprom
@@ -1434,7 +1434,7 @@ end
 
 ------------------------------------------- Keyboard
 
-local function virtualKeyboardGetDeviceInfo (virtualKeyboard)
+local function virtualKeyboardGetDeviceInfo(virtualKeyboard)
     return {
         vendor = vm.vendor,
         class = "input",
@@ -1443,15 +1443,15 @@ local function virtualKeyboardGetDeviceInfo (virtualKeyboard)
     }
 end
 
-local function virtualKeyboardHandleEvent (virtualKeyboard, event)
+local function virtualKeyboardHandleEvent(virtualKeyboard, event)
     if event[1] == "key_down" or event[1] == "key_up" or event[1] == "clipboard" then
         event[2] = virtualKeyboard.address
-        vm.computer.api.pushSignal (table.unpack (event))
+        vm.computer.api.pushSignal(table.unpack(event))
     end
 end
 
-function vm.component.newVirtualKeyboard ()
-    local virtualKeyboard = vm.component.newVirtualComponent ("keyboard")
+function vm.component.newVirtualKeyboard()
+    local virtualKeyboard = vm.component.newVirtualComponent("keyboard")
     virtualKeyboard.getDeviceInfo = virtualKeyboardGetDeviceInfo
     virtualKeyboard.handleEvent = virtualKeyboardHandleEvent
     return virtualKeyboard
@@ -1459,7 +1459,7 @@ end
 
 ------------------------------------------- Internet card
 
-local function virtualInternetCardGetDeviceInfo (virtualInternetCard)
+local function virtualInternetCardGetDeviceInfo(virtualInternetCard)
     return {
         vendor = vm.vendor,
         class = "communication",
@@ -1468,19 +1468,19 @@ local function virtualInternetCardGetDeviceInfo (virtualInternetCard)
     }
 end
 
-function vm.component.newVirtualInternetCard ()
-    local internetCardAddress = component.list ("internet")()
+function vm.component.newVirtualInternetCard()
+    local internetCardAddress = component.list("internet")()
     if not internetCardAddress then
         return nil, "no such component"
     end
 
-    local virtualInternetCard = vm.component.newVirtualComponent ("internet")
+    local virtualInternetCard = vm.component.newVirtualComponent("internet")
     virtualInternetCard.getDeviceInfo = virtualInternetCardGetDeviceInfo
 
     -- Just passing any called method to real card
-    for method, direct in pairs (component.methods (internetCardAddress)) do
-        virtualInternetCard[method] = function (...)
-            return component.invoke (internetCardAddress, method, ...)
+    for method, direct in pairs(component.methods(internetCardAddress)) do
+        virtualInternetCard[method] = function(...)
+            return component.invoke(internetCardAddress, method, ...)
         end
     end
 
@@ -1489,34 +1489,34 @@ end
 
 ------------------------------------------- Machine UI
 
-local function machineInterfaceUpdate (machineInterface)
-    gpu.setBackground (0x000000)
-    gpu.setForeground (0x696969)
-    drawSemipixelBorder (machineInterface.x, machineInterface.y, machineInterface.sizeX, machineInterface.sizeY)
+local function machineInterfaceUpdate(machineInterface)
+    gpu.setBackground(0x000000)
+    gpu.setForeground(0x696969)
+    drawSemipixelBorder(machineInterface.x, machineInterface.y, machineInterface.sizeX, machineInterface.sizeY)
 
-    gpu.setBackground (0xE1E1E1)
-    gpu.fill (machineInterface.x+1, machineInterface.y+1, machineInterface.sizeX, machineInterface.sizeY, ' ')
+    gpu.setBackground(0xE1E1E1)
+    gpu.fill(machineInterface.x+1, machineInterface.y+1, machineInterface.sizeX, machineInterface.sizeY, ' ')
 
-    for index, control in pairs (machineInterface.controls) do
-        gpu.set (machineInterface.x+1, machineInterface.y+index, control[1])
+    for index, control in pairs(machineInterface.controls) do
+        gpu.set(machineInterface.x+1, machineInterface.y+index, control[1])
     end
 end
 
-local function machineInterfaceHandleEvent (machineInterface, event)
+local function machineInterfaceHandleEvent(machineInterface, event)
     local eventType = event[1]
     if eventType == "touch" or eventType == "drag" then
         local x, y = event[3], event[4]
         if x >= machineInterface.x+1 and x < machineInterface.x+1+machineInterface.sizeX and y >= machineInterface.y+1 and y < machineInterface.y+1+machineInterface.sizeY then
             local control = machineInterface.controls[y-machineInterface.y]
             
-            gpu.setBackground (0x0075FF)
-            gpu.setForeground (0xFFFFFF)
-            gpu.fill (machineInterface.x+1, y, machineInterface.sizeX, 1, ' ')
-            gpu.set  (machineInterface.x+1, y, control[1])
+            gpu.setBackground(0x0075FF)
+            gpu.setForeground(0xFFFFFF)
+            gpu.fill(machineInterface.x+1, y, machineInterface.sizeX, 1, ' ')
+            gpu.set (machineInterface.x+1, y, control[1])
 
-            os.sleep (0.1)
+            os.sleep(0.1)
 
-            control[2] (machineInterface)
+            control[2](machineInterface)
             return true
         end
     end
@@ -1524,20 +1524,20 @@ local function machineInterfaceHandleEvent (machineInterface, event)
     return false
 end
 
-local function machineInterfaceControlShutdown (machineInterface)
-    vm.computer.api.shutdown (false)
+local function machineInterfaceControlShutdown(machineInterface)
+    vm.computer.api.shutdown(false)
 end
 
-local function machineInterfaceControlReboot (machineInterface)
-    vm.computer.api.shutdown (true)
+local function machineInterfaceControlReboot(machineInterface)
+    vm.computer.api.shutdown(true)
 end
 
-local function machineInterfaceControlInterrupt (machineInterface)
-    vm.interrupt ()
+local function machineInterfaceControlInterrupt(machineInterface)
+    vm.interrupt()
 end
 
-function vm.component.newMachineInterface (x, y)
-    local machineInterface = vm.component.newVirtualComponent ("virtual_machine_interface")
+function vm.component.newMachineInterface(x, y)
+    local machineInterface = vm.component.newVirtualComponent("virtual_machine_interface")
     machineInterface.listable = false
     machineInterface.x = x
     machineInterface.y = y
@@ -1550,7 +1550,7 @@ function vm.component.newMachineInterface (x, y)
     }
 
     machineInterface.sizeX, machineInterface.sizeY = 0, #machineInterface.controls
-    for _, control in pairs (machineInterface.controls) do
+    for _, control in pairs(machineInterface.controls) do
         if #control[1] > machineInterface.sizeX then
             machineInterface.sizeX = #control[1]
         end
