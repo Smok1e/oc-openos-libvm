@@ -1,5 +1,6 @@
 -- Single-function library that calculates crc32 hash of string
 -- Used in libvm to calculate virtual eeprom hash
+local bit = require("bit32")
 
 local CRC32 = {
     0x00000000, 0x77073096, 0xee0e612c, 0x990951ba,
